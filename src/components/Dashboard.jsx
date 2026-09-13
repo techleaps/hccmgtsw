@@ -2,13 +2,14 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../lib/AuthContext';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 const COLORS = ['#1f8fd6', '#c9a24b', '#1e9e5a', '#d9483b', '#8b5cf6', '#0b2545', '#f59e0b', '#0891b2'];
 const ROLE_LABELS = { super_admin: 'Super Admin', admin: 'Admin', supervisor: 'Supervisor', user: 'User' };
 
 export default function Dashboard() {
   const { profile } = useAuth();
+  const navigate = useNavigate();
   const [stats, setStats] = useState(null);
   const [byEstate, setByEstate] = useState([]);
   const [byPropertyType, setByPropertyType] = useState([]);
@@ -47,11 +48,12 @@ export default function Dashboard() {
     const ptMap = {};
     [...(offersRes.data || []), ...(allocRes.data || [])].forEach((r) => {
       const estateName = r.estates?.name || 'Unknown';
-      estateMap[estateName] = (estateMap[estateName] || 0) + 1;
+      estateMap[estateName] = estateMap[estateName] || { name: estateName, id: r.estate_id, count: 0 };
+      estateMap[estateName].count += 1;
       const pt = r.property_type || 'Unspecified';
       ptMap[pt] = (ptMap[pt] || 0) + 1;
     });
-    setByEstate(Object.entries(estateMap).map(([name, count]) => ({ name, count })));
+    setByEstate(Object.values(estateMap));
     setByPropertyType(Object.entries(ptMap).map(([name, value]) => ({ name, value })));
     setLoading(false);
   }
@@ -70,38 +72,39 @@ export default function Dashboard() {
       </div>
 
       <div className="grid cols-4">
-        <div className="stat-card blue">
+        <Link to="/offers" className="stat-card blue" style={{ textDecoration: 'none', cursor: 'pointer' }}>
           <div className="value">{stats.po}</div>
           <div className="label">Provisional Offers Made</div>
-        </div>
-        <div className="stat-card gold">
+        </Link>
+        <Link to="/allocations" className="stat-card gold" style={{ textDecoration: 'none', cursor: 'pointer' }}>
           <div className="value">{stats.fa}</div>
           <div className="label">Final Allocations Made</div>
-        </div>
-        <div className="stat-card grey">
+        </Link>
+        <Link to="/coo" className="stat-card grey" style={{ textDecoration: 'none', cursor: 'pointer' }}>
           <div className="value">{stats.coo}</div>
           <div className="label">Ownership Changes</div>
-        </div>
-        <div className="stat-card">
+        </Link>
+        <Link to="/estates" className="stat-card" style={{ textDecoration: 'none', cursor: 'pointer' }}>
           <div className="value">{stats.estates}</div>
           <div className="label">Active Estates</div>
-        </div>
+        </Link>
       </div>
 
       <div className="grid cols-2" style={{ marginTop: 16 }}>
-        <div className="stat-card" style={{ background: 'linear-gradient(135deg,#166534,#22c55e)' }}>
+        <Link to="/approvals" className="stat-card" style={{ textDecoration: 'none', cursor: 'pointer', background: 'linear-gradient(135deg,#166534,#22c55e)' }}>
           <div className="value">₦{stats.totalApproved.toLocaleString()}</div>
           <div className="label">Total Approved Expenditure</div>
-        </div>
-        <div className="stat-card" style={{ background: 'linear-gradient(135deg,#991b1b,#ef4444)' }}>
+        </Link>
+        <Link to="/refunds" className="stat-card" style={{ textDecoration: 'none', cursor: 'pointer', background: 'linear-gradient(135deg,#991b1b,#ef4444)' }}>
           <div className="value">₦{stats.totalRefunded.toLocaleString()}</div>
           <div className="label">Total Refunds Approved</div>
-        </div>
+        </Link>
       </div>
 
       <div className="grid cols-2" style={{ marginTop: 16 }}>
         <div className="card">
           <h3>Records by Estate</h3>
+          <p className="muted" style={{ marginTop: -8 }}>Click a bar to open that estate.</p>
           {byEstate.length === 0 ? (
             <p className="muted">No data yet.</p>
           ) : (
@@ -110,7 +113,13 @@ export default function Dashboard() {
                 <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-20} textAnchor="end" height={70} />
                 <YAxis allowDecimals={false} />
                 <Tooltip />
-                <Bar dataKey="count" fill="#1f8fd6" radius={[4, 4, 0, 0]} />
+                <Bar
+                  dataKey="count"
+                  fill="#1f8fd6"
+                  radius={[4, 4, 0, 0]}
+                  cursor="pointer"
+                  onClick={(data) => data?.id && navigate(`/estates/${data.id}`)}
+                />
               </BarChart>
             </ResponsiveContainer>
           )}

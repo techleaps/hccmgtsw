@@ -65,7 +65,7 @@ body { margin: 0; font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
   .grid.cols-2, .grid.cols-3, .grid.cols-4 { grid-template-columns: 1fr 1fr; }
 }
 
-.stat-card { background: linear-gradient(135deg, var(--navy), #123a6b); color: #fff; border-radius: 10px; padding: 16px 18px; }
+.stat-card { display: block; background: linear-gradient(135deg, var(--navy), #123a6b); color: #fff; border-radius: 10px; padding: 16px 18px; }
 .stat-card .value { font-size: 26px; font-weight: 700; }
 .stat-card .label { font-size: 12px; opacity: 0.8; text-transform: uppercase; letter-spacing: 0.04em; }
 .stat-card.gold { background: linear-gradient(135deg, #a5791f, var(--gold)); }

@@ -7,7 +7,9 @@ import ChangePassword from './components/ChangePassword';
 import Dashboard from './components/Dashboard';
 import EstatesTab from './components/EstatesTab';
 import EstateDetail from './components/EstateDetail';
+import OffersEstatesTab from './components/OffersEstatesTab';
 import OffersTab from './components/OffersTab';
+import AllocationsEstatesTab from './components/AllocationsEstatesTab';
 import AllocationRecordsTab from './components/AllocationRecordsTab';
 import CooLogTab from './components/CooLogTab';
 import ApprovalsTab from './components/ApprovalsTab';
@@ -76,8 +78,10 @@ export default function App() {
             <Route path="/" element={<Dashboard />} />
             <Route path="/estates" element={<EstatesTab />} />
             <Route path="/estates/:id" element={<EstateDetail />} />
-            <Route path="/offers" element={<OffersTab />} />
-            <Route path="/allocations" element={<AllocationRecordsTab />} />
+            <Route path="/offers" element={<OffersEstatesTab />} />
+            <Route path="/offers/:estateId" element={<OffersTab />} />
+            <Route path="/allocations" element={<AllocationsEstatesTab />} />
+            <Route path="/allocations/:estateId" element={<AllocationRecordsTab />} />
             <Route path="/coo" element={<CooLogTab />} />
             <Route path="/approvals" element={<ApprovalsTab />} />
             <Route path="/refunds" element={<RefundsTab />} />

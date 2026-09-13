@@ -88,7 +88,7 @@ export default function EstateDetail() {
       <div className="card">
         <h3>Offers in this Estate</h3>
         <div className="flex wrap" style={{ marginBottom: 12 }}>
-          <Link className="btn btn-outline btn-sm" to="/offers">Manage Offers</Link>
+          <Link className="btn btn-outline btn-sm" to={`/offers/${id}`}>Manage Offers</Link>
         </div>
         <div className="table-wrap">
           <table>
@@ -112,7 +112,7 @@ export default function EstateDetail() {
       <div className="card">
         <h3>Allocations in this Estate</h3>
         <div className="flex wrap" style={{ marginBottom: 12 }}>
-          <Link className="btn btn-outline btn-sm" to="/allocations">Manage Allocations</Link>
+          <Link className="btn btn-outline btn-sm" to={`/allocations/${id}`}>Manage Allocations</Link>
         </div>
         <div className="table-wrap">
           <table>

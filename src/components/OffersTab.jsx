@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../lib/AuthContext';
 import { submitOrApplyUpdate, submitOrApplyDelete } from '../lib/recordActions';
@@ -10,7 +10,7 @@ import BulkImportModal from './BulkImportModal';
 import { CustomFieldInputs, CustomFieldHeaders, CustomFieldCells } from './CustomFieldWidgets';
 
 const BLANK = {
-  estate_id: '', subscriber_name: '', form_no: '', property_type: '', phone_number: '', email_address: '',
+  subscriber_name: '', form_no: '', property_type: '', phone_number: '', email_address: '',
   offer_printed: false, offer_collected: false, offer_collected_by: '', offer_collected_date: '',
   amount_paid: '', comment: '', remarks: '',
 };
@@ -31,11 +31,11 @@ export const OFFER_FIELD_DEFS = [
 ];
 
 export default function OffersTab() {
+  const { estateId } = useParams();
   const { profile, isSupervisorPlus } = useAuth();
+  const [estate, setEstate] = useState(null);
   const [rows, setRows] = useState([]);
-  const [estates, setEstates] = useState([]);
   const [customFields, setCustomFields] = useState([]);
-  const [estateFilter, setEstateFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
@@ -52,32 +52,35 @@ export default function OffersTab() {
   const [cooForm, setCooForm] = useState({ new_owner: '', reason: '', new_pon: '', comments: '' });
   const [cooSaving, setCooSaving] = useState(false);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [estateId]);
 
   async function load() {
     setLoading(true);
-    const { data: estatesData } = await supabase.from('estates').select('*').eq('is_deleted', false).order('name');
-    setEstates(estatesData || []);
+    const { data: estateData } = await supabase.from('estates').select('*').eq('id', estateId).single();
+    setEstate(estateData || null);
     setCustomFields(await fetchCustomFields('offers'));
     const { data } = await supabase
       .from('offers')
-      .select('*, estates(name)')
+      .select('*')
+      .eq('estate_id', estateId)
       .eq('is_deleted', false)
-      .order('serial_no', { ascending: false });
+      .order('created_at', { ascending: true });
     setRows(data || []);
     setLoading(false);
   }
 
+  // local, per-estate serial numbers (1, 2, 3…) rather than a global row id
+  const numbered = useMemo(() => rows.map((r, i) => ({ ...r, localSerial: i + 1 })), [rows]);
+
   const filtered = useMemo(() => {
-    return rows.filter((r) => {
-      if (estateFilter && r.estate_id !== estateFilter) return false;
+    return numbered.filter((r) => {
       if (statusFilter === 'printed' && !r.offer_printed) return false;
       if (statusFilter === 'collected' && !r.offer_collected) return false;
       if (statusFilter === 'pending' && r.offer_collected) return false;
       const hay = `${r.subscriber_name} ${r.form_no || ''} ${r.phone_number || ''} ${r.email_address || ''}`.toLowerCase();
       return hay.includes(search.toLowerCase());
     });
-  }, [rows, estateFilter, statusFilter, search]);
+  }, [numbered, statusFilter, search]);
 
   const summary = useMemo(() => ({
     total: filtered.length,
@@ -90,7 +93,7 @@ export default function OffersTab() {
   function openEdit(row) {
     setEditingRow(row);
     setForm({
-      estate_id: row.estate_id, subscriber_name: row.subscriber_name || '', form_no: row.form_no || '',
+      subscriber_name: row.subscriber_name || '', form_no: row.form_no || '',
       property_type: row.property_type || '', phone_number: row.phone_number || '', email_address: row.email_address || '',
       offer_printed: row.offer_printed, offer_collected: row.offer_collected,
       offer_collected_by: row.offer_collected_by || '', offer_collected_date: row.offer_collected_date || '',
@@ -103,10 +106,7 @@ export default function OffersTab() {
   async function handleSave(e) {
     e.preventDefault();
     setError('');
-    if (!form.estate_id || !form.subscriber_name.trim()) {
-      setError('Estate and Subscriber Name are required.');
-      return;
-    }
+    if (!form.subscriber_name.trim()) { setError('Subscriber Name is required.'); return; }
     setSaving(true);
     const payload = blankToNull({ ...form, amount_paid: Number(form.amount_paid) || 0, custom_data: customData }, ['offer_collected_date']);
 
@@ -119,7 +119,7 @@ export default function OffersTab() {
       load();
       return;
     }
-    const { error } = await supabase.from('offers').insert({ ...payload, created_by: profile.id });
+    const { error } = await supabase.from('offers').insert({ ...payload, estate_id: estateId, created_by: profile.id });
     setSaving(false);
     if (error) { setError(error.message); return; }
     setShowModal(false);
@@ -166,7 +166,10 @@ export default function OffersTab() {
   return (
     <div>
       <div className="page-title">
-        <h2>Offers Register</h2>
+        <div>
+          <Link to="/offers" className="muted">&larr; All Estates</Link>
+          <h2>Offers — {estate?.name || '…'}</h2>
+        </div>
         <div className="flex wrap">
           <button className="btn btn-outline" onClick={() => setShowColumns(true)}>Manage Columns</button>
           <button className="btn btn-outline" onClick={() => setShowImport(true)}>Bulk Import from Excel</button>
@@ -183,13 +186,6 @@ export default function OffersTab() {
 
       <div className="card">
         <div className="flex wrap">
-          <div style={{ minWidth: 180 }}>
-            <label>Filter by Estate</label>
-            <select value={estateFilter} onChange={(e) => setEstateFilter(e.target.value)}>
-              <option value="">All Estates</option>
-              {estates.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
-            </select>
-          </div>
           <div style={{ minWidth: 180 }}>
             <label>Status</label>
             <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
@@ -211,7 +207,7 @@ export default function OffersTab() {
           <table>
             <thead>
               <tr>
-                <th>S/N</th><th>Estate</th><th>Subscriber Name</th><th>Form No</th><th>Property Type</th>
+                <th>S/N</th><th>Subscriber Name</th><th>Form No</th><th>Property Type</th>
                 <th>Phone</th><th>Email</th><th>Printed</th><th>Collected</th><th>Collected By</th><th>Collected On</th>
                 <th>Amount Paid</th>
                 <CustomFieldHeaders fields={customFields} />
@@ -221,8 +217,7 @@ export default function OffersTab() {
             <tbody>
               {filtered.map((r) => (
                 <tr key={r.id}>
-                  <td>{r.serial_no}</td>
-                  <td>{r.estates?.name}</td>
+                  <td>{r.localSerial}</td>
                   <td>{r.subscriber_name}</td>
                   <td>{r.form_no}</td>
                   <td>{r.property_type}</td>
@@ -246,7 +241,7 @@ export default function OffersTab() {
                   </td>
                 </tr>
               ))}
-              {filtered.length === 0 && <tr><td colSpan={16 + customFields.length} className="empty-state">No offer records found.</td></tr>}
+              {filtered.length === 0 && <tr><td colSpan={15 + customFields.length} className="empty-state">No offer records found.</td></tr>}
             </tbody>
           </table>
         )}
@@ -256,18 +251,11 @@ export default function OffersTab() {
       {showModal && (
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
           <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
-            <h3>{editingRow ? 'Edit Offer Record' : 'New Offer Record'}</h3>
+            <h3>{editingRow ? 'Edit Offer Record' : `New Offer — ${estate?.name || ''}`}</h3>
             <form onSubmit={handleSave}>
               <div className="grid cols-2">
-                <div className="field">
-                  <label>Estate</label>
-                  <select value={form.estate_id} onChange={(e) => setForm({ ...form, estate_id: e.target.value })} required>
-                    <option value="">Select estate…</option>
-                    {estates.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
-                  </select>
-                </div>
-                <div className="field"><label>Property Type</label><input value={form.property_type} onChange={(e) => setForm({ ...form, property_type: e.target.value })} placeholder="e.g. 3BR, 4BR Fully" /></div>
                 <div className="field" style={{ gridColumn: 'span 2' }}><label>Subscriber Name</label><input value={form.subscriber_name} onChange={(e) => setForm({ ...form, subscriber_name: e.target.value })} required /></div>
+                <div className="field"><label>Property Type</label><input value={form.property_type} onChange={(e) => setForm({ ...form, property_type: e.target.value })} placeholder="e.g. 3BR, 4BR Fully" /></div>
                 <div className="field"><label>Form No / PON</label><input value={form.form_no} onChange={(e) => setForm({ ...form, form_no: e.target.value })} /></div>
                 <div className="field"><label>Phone Number</label><input value={form.phone_number} onChange={(e) => setForm({ ...form, phone_number: e.target.value })} /></div>
                 <div className="field"><label>Email Address</label><input type="email" value={form.email_address} onChange={(e) => setForm({ ...form, email_address: e.target.value })} /></div>
@@ -324,10 +312,10 @@ export default function OffersTab() {
       {showColumns && <ManageColumnsModal tableName="offers" onClose={() => setShowColumns(false)} onChanged={load} />}
       {showImport && (
         <BulkImportModal
-          title="Bulk Import Offers"
+          title={`Bulk Import Offers — ${estate?.name || ''}`}
           tableName="offers"
           fieldDefs={OFFER_FIELD_DEFS}
-          estates={estates}
+          presetEstateId={estateId}
           profile={profile}
           onClose={() => setShowImport(false)}
           onImported={load}

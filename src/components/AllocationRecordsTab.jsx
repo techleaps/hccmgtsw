@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../lib/AuthContext';
 import { submitOrApplyUpdate, submitOrApplyDelete } from '../lib/recordActions';
@@ -10,7 +10,7 @@ import BulkImportModal from './BulkImportModal';
 import { CustomFieldInputs, CustomFieldHeaders, CustomFieldCells } from './CustomFieldWidgets';
 
 const BLANK = {
-  estate_id: '', subscriber_name: '', house_no: '', property_type: '',
+  subscriber_name: '', house_no: '', property_type: '',
   printed: false, signed: false, collected: false, collected_by: '', collected_date: '',
   phone_number: '', remarks: '',
 };
@@ -29,11 +29,11 @@ export const ALLOCATION_FIELD_DEFS = [
 ];
 
 export default function AllocationRecordsTab() {
+  const { estateId } = useParams();
   const { profile, isSupervisorPlus } = useAuth();
+  const [estate, setEstate] = useState(null);
   const [rows, setRows] = useState([]);
-  const [estates, setEstates] = useState([]);
   const [customFields, setCustomFields] = useState([]);
-  const [estateFilter, setEstateFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
@@ -50,32 +50,34 @@ export default function AllocationRecordsTab() {
   const [cooForm, setCooForm] = useState({ new_owner: '', reason: '', new_allocation_no: '', comments: '' });
   const [cooSaving, setCooSaving] = useState(false);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [estateId]);
 
   async function load() {
     setLoading(true);
-    const { data: estatesData } = await supabase.from('estates').select('*').eq('is_deleted', false).order('name');
-    setEstates(estatesData || []);
+    const { data: estateData } = await supabase.from('estates').select('*').eq('id', estateId).single();
+    setEstate(estateData || null);
     setCustomFields(await fetchCustomFields('allocation_records'));
     const { data } = await supabase
       .from('allocation_records')
-      .select('*, estates(name)')
+      .select('*')
+      .eq('estate_id', estateId)
       .eq('is_deleted', false)
-      .order('serial_no', { ascending: false });
+      .order('created_at', { ascending: true });
     setRows(data || []);
     setLoading(false);
   }
 
+  const numbered = useMemo(() => rows.map((r, i) => ({ ...r, localSerial: i + 1 })), [rows]);
+
   const filtered = useMemo(() => {
-    return rows.filter((r) => {
-      if (estateFilter && r.estate_id !== estateFilter) return false;
+    return numbered.filter((r) => {
       if (statusFilter === 'signed' && !r.signed) return false;
       if (statusFilter === 'collected' && !r.collected) return false;
       if (statusFilter === 'pending' && r.collected) return false;
       const hay = `${r.subscriber_name} ${r.house_no || ''} ${r.phone_number || ''}`.toLowerCase();
       return hay.includes(search.toLowerCase());
     });
-  }, [rows, estateFilter, statusFilter, search]);
+  }, [numbered, statusFilter, search]);
 
   const summary = useMemo(() => ({
     total: filtered.length,
@@ -87,7 +89,7 @@ export default function AllocationRecordsTab() {
   function openEdit(row) {
     setEditingRow(row);
     setForm({
-      estate_id: row.estate_id, subscriber_name: row.subscriber_name || '', house_no: row.house_no || '',
+      subscriber_name: row.subscriber_name || '', house_no: row.house_no || '',
       property_type: row.property_type || '', printed: row.printed, signed: row.signed, collected: row.collected,
       collected_by: row.collected_by || '', collected_date: row.collected_date || '', phone_number: row.phone_number || '',
       remarks: row.remarks || '',
@@ -99,10 +101,7 @@ export default function AllocationRecordsTab() {
   async function handleSave(e) {
     e.preventDefault();
     setError('');
-    if (!form.estate_id || !form.subscriber_name.trim()) {
-      setError('Estate and Subscriber Name are required.');
-      return;
-    }
+    if (!form.subscriber_name.trim()) { setError('Subscriber Name is required.'); return; }
     setSaving(true);
     const payload = blankToNull({ ...form, custom_data: customData }, ['collected_date']);
 
@@ -115,7 +114,7 @@ export default function AllocationRecordsTab() {
       load();
       return;
     }
-    const { error } = await supabase.from('allocation_records').insert({ ...payload, created_by: profile.id });
+    const { error } = await supabase.from('allocation_records').insert({ ...payload, estate_id: estateId, created_by: profile.id });
     setSaving(false);
     if (error) { setError(error.message); return; }
     setShowModal(false);
@@ -162,7 +161,10 @@ export default function AllocationRecordsTab() {
   return (
     <div>
       <div className="page-title">
-        <h2>Allocations Register</h2>
+        <div>
+          <Link to="/allocations" className="muted">&larr; All Estates</Link>
+          <h2>Allocations — {estate?.name || '…'}</h2>
+        </div>
         <div className="flex wrap">
           <button className="btn btn-outline" onClick={() => setShowColumns(true)}>Manage Columns</button>
           <button className="btn btn-outline" onClick={() => setShowImport(true)}>Bulk Import from Excel</button>
@@ -178,13 +180,6 @@ export default function AllocationRecordsTab() {
 
       <div className="card">
         <div className="flex wrap">
-          <div style={{ minWidth: 180 }}>
-            <label>Filter by Estate</label>
-            <select value={estateFilter} onChange={(e) => setEstateFilter(e.target.value)}>
-              <option value="">All Estates</option>
-              {estates.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
-            </select>
-          </div>
           <div style={{ minWidth: 180 }}>
             <label>Status</label>
             <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
@@ -206,7 +201,7 @@ export default function AllocationRecordsTab() {
           <table>
             <thead>
               <tr>
-                <th>S/N</th><th>Estate</th><th>House No</th><th>Subscriber Name</th><th>Property Type</th>
+                <th>S/N</th><th>House No</th><th>Subscriber Name</th><th>Property Type</th>
                 <th>Printed</th><th>Signed</th><th>Collected</th><th>Collected By</th><th>Date Collected</th><th>Phone</th>
                 <CustomFieldHeaders fields={customFields} />
                 <th>Remarks</th><th>Actions</th>
@@ -215,8 +210,7 @@ export default function AllocationRecordsTab() {
             <tbody>
               {filtered.map((r) => (
                 <tr key={r.id}>
-                  <td>{r.serial_no}</td>
-                  <td>{r.estates?.name}</td>
+                  <td>{r.localSerial}</td>
                   <td>{r.house_no}</td>
                   <td>{r.subscriber_name}</td>
                   <td>{r.property_type}</td>
@@ -238,7 +232,7 @@ export default function AllocationRecordsTab() {
                   </td>
                 </tr>
               ))}
-              {filtered.length === 0 && <tr><td colSpan={14 + customFields.length} className="empty-state">No allocation records found.</td></tr>}
+              {filtered.length === 0 && <tr><td colSpan={13 + customFields.length} className="empty-state">No allocation records found.</td></tr>}
             </tbody>
           </table>
         )}
@@ -248,18 +242,11 @@ export default function AllocationRecordsTab() {
       {showModal && (
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
           <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
-            <h3>{editingRow ? 'Edit Allocation Record' : 'New Allocation Record'}</h3>
+            <h3>{editingRow ? 'Edit Allocation Record' : `New Allocation — ${estate?.name || ''}`}</h3>
             <form onSubmit={handleSave}>
               <div className="grid cols-2">
-                <div className="field">
-                  <label>Estate</label>
-                  <select value={form.estate_id} onChange={(e) => setForm({ ...form, estate_id: e.target.value })} required>
-                    <option value="">Select estate…</option>
-                    {estates.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
-                  </select>
-                </div>
-                <div className="field"><label>House No</label><input value={form.house_no} onChange={(e) => setForm({ ...form, house_no: e.target.value })} /></div>
                 <div className="field" style={{ gridColumn: 'span 2' }}><label>Subscriber Name</label><input value={form.subscriber_name} onChange={(e) => setForm({ ...form, subscriber_name: e.target.value })} required /></div>
+                <div className="field"><label>House No</label><input value={form.house_no} onChange={(e) => setForm({ ...form, house_no: e.target.value })} /></div>
                 <div className="field"><label>Property Type</label><input value={form.property_type} onChange={(e) => setForm({ ...form, property_type: e.target.value })} placeholder="e.g. 3BR, 4BR Fully" /></div>
                 <div className="field"><label>Phone Number</label><input value={form.phone_number} onChange={(e) => setForm({ ...form, phone_number: e.target.value })} /></div>
               </div>
@@ -314,10 +301,10 @@ export default function AllocationRecordsTab() {
       {showColumns && <ManageColumnsModal tableName="allocation_records" onClose={() => setShowColumns(false)} onChanged={load} />}
       {showImport && (
         <BulkImportModal
-          title="Bulk Import Allocations"
+          title={`Bulk Import Allocations — ${estate?.name || ''}`}
           tableName="allocation_records"
           fieldDefs={ALLOCATION_FIELD_DEFS}
-          estates={estates}
+          presetEstateId={estateId}
           profile={profile}
           onClose={() => setShowImport(false)}
           onImported={load}

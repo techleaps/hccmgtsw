@@ -38,16 +38,30 @@ function isChecked(value) {
   return s.length > 0;
 }
 
-export default function BulkImportModal({ title, tableName, fieldDefs, estates = [], onClose, onImported, profile }) {
-  const [step, setStep] = useState('estate'); // estate -> upload -> mapping -> preview -> importing -> done
-  const [estateId, setEstateId] = useState('');
+// A row that's really a section-divider / repeated-header / estate-name banner
+// (common in hand-maintained registers) rather than an actual subscriber row.
+function looksLikeJunkRow(record, requiredKey, knownEstateNames) {
+  const val = String(record[requiredKey] ?? '').trim().toLowerCase();
+  if (!val) return true;
+  if (knownEstateNames.some((n) => n.toLowerCase() === val)) return true;
+  return false;
+}
+
+export default function BulkImportModal({ title, tableName, fieldDefs, estates = [], presetEstateId, onClose, onImported, profile }) {
+  const [step, setStep] = useState(presetEstateId ? 'upload' : 'estate');
+  const [estateId, setEstateId] = useState(presetEstateId || '');
+  const [defaultPropertyType, setDefaultPropertyType] = useState('');
   const [fileName, setFileName] = useState('');
   const [headers, setHeaders] = useState([]);
-  const [rows, setRows] = useState([]); // array of arrays, raw
-  const [mapping, setMapping] = useState([]); // array parallel to headers, field key or IGNORE
+  const [rowsRaw, setRowsRaw] = useState([]);      // for numbers/dates/checkboxes
+  const [rowsDisplay, setRowsDisplay] = useState([]); // formatted text, for text fields (avoids "100%" -> 1 bugs)
+  const [mapping, setMapping] = useState([]);
+  const [included, setIncluded] = useState([]); // boolean per row, whether to import it
   const [error, setError] = useState('');
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [result, setResult] = useState(null);
+
+  const hasPropertyTypeField = fieldDefs.some((f) => f.key === 'property_type');
 
   function handleFile(e) {
     setError('');
@@ -59,17 +73,26 @@ export default function BulkImportModal({ title, tableName, fieldDefs, estates =
       try {
         const wb = XLSX.read(evt.target.result, { type: 'array', cellDates: true });
         const sheet = wb.Sheets[wb.SheetNames[0]];
-        const grid = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: true });
-        const nonEmptyRows = grid.filter((r) => r.some((c) => String(c ?? '').trim() !== ''));
-        if (nonEmptyRows.length < 2) {
+        const gridRaw = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: true });
+        const gridDisplay = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
+
+        const keepIdx = gridRaw
+          .map((r, i) => (r.some((c) => String(c ?? '').trim() !== '') ? i : -1))
+          .filter((i) => i !== -1);
+        if (keepIdx.length < 2) {
           setError('Could not find a header row and data rows in this file.');
           return;
         }
-        const hdrRow = nonEmptyRows[0].map((h) => String(h ?? '').trim());
-        const dataRows = nonEmptyRows.slice(1);
+        const [hdrIdx, ...dataIdx] = keepIdx;
+        const hdrRow = gridRaw[hdrIdx].map((h) => String(h ?? '').trim());
+        const dataRaw = dataIdx.map((i) => gridRaw[i]);
+        const dataDisplay = dataIdx.map((i) => gridDisplay[i]);
+
         setHeaders(hdrRow);
-        setRows(dataRows);
-        setMapping(guessMapping(hdrRow, fieldDefs));
+        setRowsRaw(dataRaw);
+        setRowsDisplay(dataDisplay);
+        const guessed = guessMapping(hdrRow, fieldDefs);
+        setMapping(guessed);
         setStep('mapping');
       } catch (err) {
         setError('Could not read that file. Make sure it is a valid .xlsx, .xls, or .csv file.');
@@ -84,50 +107,74 @@ export default function BulkImportModal({ title, tableName, fieldDefs, estates =
     setMapping(next);
   }
 
-  const mappedPreview = useMemo(() => {
-    return buildRecords(rows.slice(0, 5), headers, mapping, fieldDefs);
-  }, [rows, headers, mapping, fieldDefs]);
-
-  function buildRecords(sourceRows, hdrs, map, defs) {
-    return sourceRows.map((r) => {
+  function buildRecords(rawRows, displayRows, hdrs, map, defs) {
+    return rawRows.map((rawRow, ri) => {
+      const dispRow = displayRows[ri];
       const rec = {};
       hdrs.forEach((h, i) => {
         const key = map[i];
         if (!key || key === IGNORE) return;
         const def = defs.find((f) => f.key === key);
-        const raw = r[i];
+        const raw = rawRow[i];
+        const disp = dispRow[i];
         if (def.type === 'checkbox') rec[key] = isChecked(raw);
         else if (def.type === 'date') rec[key] = excelDateToISO(raw);
         else if (def.type === 'number') {
           const n = parseFloat(String(raw).replace(/[^0-9.\-]/g, ''));
           rec[key] = isNaN(n) ? 0 : n;
         } else {
-          const s = String(raw ?? '').trim();
+          // text: use the FORMATTED display value, so a percentage-formatted
+          // cell reads as "100%" instead of the underlying number 1
+          const s = String(disp ?? '').trim();
           rec[key] = s === '' ? null : s;
         }
       });
+      if (hasPropertyTypeField && defaultPropertyType.trim() && !rec.property_type) {
+        rec.property_type = defaultPropertyType.trim();
+      }
       return rec;
     });
   }
 
   const requiredKey = fieldDefs.find((f) => f.required)?.key;
   const mappingHasRequired = requiredKey ? mapping.includes(requiredKey) : true;
+  const knownEstateNames = estates.map((e) => e.name);
+
+  const allRecords = useMemo(
+    () => buildRecords(rowsRaw, rowsDisplay, headers, mapping, fieldDefs),
+    [rowsRaw, rowsDisplay, headers, mapping, fieldDefs, defaultPropertyType]
+  );
+
+  function goToPreview() {
+    setIncluded(allRecords.map((r) => !looksLikeJunkRow(r, requiredKey, knownEstateNames)));
+    setStep('preview');
+  }
+
+  function toggleRow(i) {
+    const next = [...included];
+    next[i] = !next[i];
+    setIncluded(next);
+  }
+  function toggleAll(value) {
+    setIncluded(included.map(() => value));
+  }
+
+  const flaggedCount = allRecords.filter((r) => looksLikeJunkRow(r, requiredKey, knownEstateNames)).length;
+  const visibleFields = fieldDefs.filter((f) => mapping.includes(f.key));
 
   async function handleImport() {
     setStep('importing');
     setError('');
-    const allRecords = buildRecords(rows, headers, mapping, fieldDefs)
-      .filter((r) => !requiredKey || (r[requiredKey] && String(r[requiredKey]).trim()));
-
-    const skipped = rows.length - allRecords.length;
+    const toImport = allRecords.filter((_, i) => included[i]);
+    const skipped = allRecords.length - toImport.length;
     const CHUNK = 300;
     let imported = 0;
     let failed = 0;
     let firstErrorMsg = '';
-    setProgress({ done: 0, total: allRecords.length });
+    setProgress({ done: 0, total: toImport.length });
 
-    for (let i = 0; i < allRecords.length; i += CHUNK) {
-      const chunk = allRecords.slice(i, i + CHUNK).map((r) => ({
+    for (let i = 0; i < toImport.length; i += CHUNK) {
+      const chunk = toImport.slice(i, i + CHUNK).map((r) => ({
         ...r,
         estate_id: estateId,
         created_by: profile.id,
@@ -139,7 +186,7 @@ export default function BulkImportModal({ title, tableName, fieldDefs, estates =
       } else {
         imported += chunk.length;
       }
-      setProgress({ done: Math.min(i + CHUNK, allRecords.length), total: allRecords.length });
+      setProgress({ done: Math.min(i + CHUNK, toImport.length), total: toImport.length });
     }
 
     setResult({ imported, failed, skipped, firstErrorMsg });
@@ -183,9 +230,19 @@ export default function BulkImportModal({ title, tableName, fieldDefs, estates =
               <label>File</label>
               <input type="file" accept=".xlsx,.xls,.csv" onChange={handleFile} />
             </div>
+            {hasPropertyTypeField && (
+              <div className="field">
+                <label>Default Property Type (optional)</label>
+                <input
+                  value={defaultPropertyType}
+                  onChange={(e) => setDefaultPropertyType(e.target.value)}
+                  placeholder="e.g. 2BR — used for every row if the file has no Property Type column"
+                />
+              </div>
+            )}
             {error && <div className="error-text">{error}</div>}
             <div className="modal-actions">
-              <button type="button" className="btn btn-outline" onClick={() => setStep('estate')}>Back</button>
+              {!presetEstateId && <button type="button" className="btn btn-outline" onClick={() => setStep('estate')}>Back</button>}
             </div>
           </div>
         )}
@@ -193,7 +250,7 @@ export default function BulkImportModal({ title, tableName, fieldDefs, estates =
         {step === 'mapping' && (
           <div>
             <p className="muted">
-              <b>{fileName}</b> — {rows.length} data row{rows.length === 1 ? '' : 's'} found. Match each
+              <b>{fileName}</b> — {rowsRaw.length} data row{rowsRaw.length === 1 ? '' : 's'} found. Match each
               column from your file to a field below (or leave as "Ignore this column").
             </p>
             <div className="table-wrap" style={{ maxHeight: 320, overflowY: 'auto' }}>
@@ -223,7 +280,7 @@ export default function BulkImportModal({ title, tableName, fieldDefs, estates =
             )}
             <div className="modal-actions">
               <button type="button" className="btn btn-outline" onClick={() => setStep('upload')}>Back</button>
-              <button type="button" className="btn btn-primary" disabled={!mappingHasRequired} onClick={() => setStep('preview')}>
+              <button type="button" className="btn btn-primary" disabled={!mappingHasRequired} onClick={goToPreview}>
                 Preview Import
               </button>
             </div>
@@ -232,16 +289,34 @@ export default function BulkImportModal({ title, tableName, fieldDefs, estates =
 
         {step === 'preview' && (
           <div>
-            <p className="muted">Preview of the first {mappedPreview.length} rows, as they will be saved. Total rows to import: <b>{rows.length}</b>.</p>
-            <div className="table-wrap" style={{ maxHeight: 320, overflowY: 'auto' }}>
+            <p className="muted">
+              Review every row below before importing. Untick any row that shouldn't be
+              imported — for example a section-divider or repeated header row from your sheet.
+              {flaggedCount > 0 && (
+                <> <b>{flaggedCount} row{flaggedCount === 1 ? '' : 's'}</b> looked like they might not be real
+                subscriber rows, so they've been unticked for you — please double-check them.</>
+              )}
+            </p>
+            <div className="flex" style={{ marginBottom: 8 }}>
+              <button type="button" className="btn btn-outline btn-sm" onClick={() => toggleAll(true)}>Select All</button>
+              <button type="button" className="btn btn-outline btn-sm" onClick={() => toggleAll(false)}>Deselect All</button>
+              <span className="muted" style={{ alignSelf: 'center' }}>
+                {included.filter(Boolean).length} of {allRecords.length} rows selected
+              </span>
+            </div>
+            <div className="table-wrap" style={{ maxHeight: 420, overflowY: 'auto' }}>
               <table>
                 <thead>
-                  <tr>{fieldDefs.filter((f) => mapping.includes(f.key)).map((f) => <th key={f.key}>{f.label}</th>)}</tr>
+                  <tr>
+                    <th></th>
+                    {visibleFields.map((f) => <th key={f.key}>{f.label}</th>)}
+                  </tr>
                 </thead>
                 <tbody>
-                  {mappedPreview.map((r, i) => (
-                    <tr key={i}>
-                      {fieldDefs.filter((f) => mapping.includes(f.key)).map((f) => (
+                  {allRecords.map((r, i) => (
+                    <tr key={i} style={included[i] ? {} : { opacity: 0.4 }}>
+                      <td><input type="checkbox" checked={!!included[i]} onChange={() => toggleRow(i)} /></td>
+                      {visibleFields.map((f) => (
                         <td key={f.key}>{f.type === 'checkbox' ? (r[f.key] ? '✓' : '') : (r[f.key] ?? '')}</td>
                       ))}
                     </tr>
@@ -250,11 +325,14 @@ export default function BulkImportModal({ title, tableName, fieldDefs, estates =
               </table>
             </div>
             <p className="muted" style={{ marginTop: 10 }}>
-              Rows missing the required "{fieldDefs.find((f) => f.required)?.label}" field will be skipped automatically.
+              Rows missing the required "{fieldDefs.find((f) => f.required)?.label}" field are skipped
+              automatically even if left ticked.
             </p>
             <div className="modal-actions">
               <button type="button" className="btn btn-outline" onClick={() => setStep('mapping')}>Back</button>
-              <button type="button" className="btn btn-primary" onClick={handleImport}>Import {rows.length} Rows</button>
+              <button type="button" className="btn btn-primary" onClick={handleImport}>
+                Import {included.filter(Boolean).length} Rows
+              </button>
             </div>
           </div>
         )}
@@ -269,7 +347,7 @@ export default function BulkImportModal({ title, tableName, fieldDefs, estates =
           <div>
             <h4 style={{ color: '#1e9e5a' }}>Import complete</h4>
             <p><b>{result.imported}</b> row(s) imported successfully.</p>
-            {result.skipped > 0 && <p><b>{result.skipped}</b> row(s) skipped (missing required field).</p>}
+            {result.skipped > 0 && <p><b>{result.skipped}</b> row(s) not imported (unticked or missing required field).</p>}
             {result.failed > 0 && (
               <p className="error-text"><b>{result.failed}</b> row(s) failed to save. First error: {result.firstErrorMsg}</p>
             )}
