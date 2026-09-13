@@ -32,7 +32,7 @@ export const OFFER_FIELD_DEFS = [
 
 export default function OffersTab() {
   const { estateId } = useParams();
-  const { profile, isSupervisorPlus } = useAuth();
+  const { profile, isSupervisorPlus, isAdmin } = useAuth();
   const [estate, setEstate] = useState(null);
   const [rows, setRows] = useState([]);
   const [customFields, setCustomFields] = useState([]);
@@ -163,6 +163,18 @@ export default function OffersTab() {
     load();
   }
 
+  async function handleClearEstate() {
+    if (rows.length === 0) { alert('There are no offer records to clear for this estate.'); return; }
+    const ok = confirm(`This will remove all ${rows.length} offer record(s) for ${estate?.name}. You would need to re-import to get them back. Continue?`);
+    if (!ok) return;
+    const typed = prompt('Type DELETE to confirm clearing all offer records for this estate.');
+    if (typed !== 'DELETE') { alert('Cancelled.'); return; }
+    const { error } = await supabase.from('offers').update({ is_deleted: true }).eq('estate_id', estateId).eq('is_deleted', false);
+    if (error) { alert(error.message); return; }
+    alert('All offer records for this estate have been cleared. You can now re-import a clean file.');
+    load();
+  }
+
   return (
     <div>
       <div className="page-title">
@@ -173,6 +185,7 @@ export default function OffersTab() {
         <div className="flex wrap">
           <button className="btn btn-outline" onClick={() => setShowColumns(true)}>Manage Columns</button>
           <button className="btn btn-outline" onClick={() => setShowImport(true)}>Bulk Import from Excel</button>
+          {isAdmin && <button className="btn btn-danger" onClick={handleClearEstate}>Clear All Records for This Estate</button>}
           <button className="btn btn-primary" onClick={openNew}>+ New Offer</button>
         </div>
       </div>

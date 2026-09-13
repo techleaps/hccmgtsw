@@ -30,7 +30,7 @@ export const ALLOCATION_FIELD_DEFS = [
 
 export default function AllocationRecordsTab() {
   const { estateId } = useParams();
-  const { profile, isSupervisorPlus } = useAuth();
+  const { profile, isSupervisorPlus, isAdmin } = useAuth();
   const [estate, setEstate] = useState(null);
   const [rows, setRows] = useState([]);
   const [customFields, setCustomFields] = useState([]);
@@ -158,6 +158,18 @@ export default function AllocationRecordsTab() {
     load();
   }
 
+  async function handleClearEstate() {
+    if (rows.length === 0) { alert('There are no allocation records to clear for this estate.'); return; }
+    const ok = confirm(`This will remove all ${rows.length} allocation record(s) for ${estate?.name}. You would need to re-import to get them back. Continue?`);
+    if (!ok) return;
+    const typed = prompt('Type DELETE to confirm clearing all allocation records for this estate.');
+    if (typed !== 'DELETE') { alert('Cancelled.'); return; }
+    const { error } = await supabase.from('allocation_records').update({ is_deleted: true }).eq('estate_id', estateId).eq('is_deleted', false);
+    if (error) { alert(error.message); return; }
+    alert('All allocation records for this estate have been cleared. You can now re-import a clean file.');
+    load();
+  }
+
   return (
     <div>
       <div className="page-title">
@@ -168,6 +180,7 @@ export default function AllocationRecordsTab() {
         <div className="flex wrap">
           <button className="btn btn-outline" onClick={() => setShowColumns(true)}>Manage Columns</button>
           <button className="btn btn-outline" onClick={() => setShowImport(true)}>Bulk Import from Excel</button>
+          {isAdmin && <button className="btn btn-danger" onClick={handleClearEstate}>Clear All Records for This Estate</button>}
           <button className="btn btn-primary" onClick={openNew}>+ New Allocation</button>
         </div>
       </div>
