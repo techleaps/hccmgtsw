@@ -17,15 +17,22 @@ export default function CooLogTab() {
     setEstates(estatesData || []);
     const { data } = await supabase
       .from('ownership_changes')
-      .select('*, subscribers(id, estate_id, estates(name))')
+      .select('*, offers(estate_id, estates(name)), allocation_records(estate_id, estates(name))')
       .order('created_at', { ascending: false });
     setRows(data || []);
     setLoading(false);
   }
 
+  function estateOf(r) {
+    return r.offers?.estates?.name || r.allocation_records?.estates?.name || '—';
+  }
+  function estateIdOf(r) {
+    return r.offers?.estate_id || r.allocation_records?.estate_id || null;
+  }
+
   const filtered = useMemo(() => {
     return rows.filter((r) => {
-      if (estateFilter && r.subscribers?.estate_id !== estateFilter) return false;
+      if (estateFilter && estateIdOf(r) !== estateFilter) return false;
       const hay = `${r.previous_owner} ${r.new_owner}`.toLowerCase();
       return hay.includes(search.toLowerCase());
     });
@@ -35,9 +42,15 @@ export default function CooLogTab() {
     <div>
       <div className="page-title">
         <h2>Change of Ownership — History</h2>
-        <Link className="btn btn-primary" to="/subscribers">Go to Subscribers Register</Link>
+        <div className="flex">
+          <Link className="btn btn-outline" to="/offers">Offers Register</Link>
+          <Link className="btn btn-primary" to="/allocations">Allocations Register</Link>
+        </div>
       </div>
-      <p className="muted">To record a new change of ownership, open the subscriber's row in the Subscribers Register and click "Record COO".</p>
+      <p className="muted">
+        To record a new change of ownership, open the subscriber's row in the Offers or
+        Allocations register and click "Record COO".
+      </p>
 
       <div className="grid cols-3">
         <div className="stat-card"><div className="value">{filtered.length}</div><div className="label">Total Ownership Changes</div></div>
@@ -64,19 +77,19 @@ export default function CooLogTab() {
           <table>
             <thead>
               <tr>
-                <th>Date</th><th>Estate</th><th>Previous Owner</th><th>New Owner</th>
-                <th>New PON</th><th>New Allocation No</th><th>Reason</th><th>Comments</th>
+                <th>Date</th><th>Register</th><th>Estate</th><th>Previous Owner</th><th>New Owner</th>
+                <th>New PON / House No</th><th>Reason</th><th>Comments</th>
               </tr>
             </thead>
             <tbody>
               {filtered.map((r) => (
                 <tr key={r.id}>
                   <td>{r.date_changed}</td>
-                  <td>{r.subscribers?.estates?.name}</td>
+                  <td>{r.offer_id ? 'Offer' : 'Allocation'}</td>
+                  <td>{estateOf(r)}</td>
                   <td>{r.previous_owner}</td>
                   <td>{r.new_owner}</td>
-                  <td>{r.new_pon}</td>
-                  <td>{r.new_allocation_no}</td>
+                  <td>{r.new_pon || r.new_allocation_no}</td>
                   <td>{r.reason}</td>
                   <td>{r.comments}</td>
                 </tr>

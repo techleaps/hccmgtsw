@@ -20,14 +20,15 @@ export default function Dashboard() {
 
   async function load() {
     setLoading(true);
-    const [poRes, faRes, cooRes, estatesRes, approvalsRes, refundsRes, subsRes] = await Promise.all([
-      supabase.from('subscribers').select('id', { count: 'exact', head: true }).eq('offer_made', true).eq('is_deleted', false),
-      supabase.from('subscribers').select('id', { count: 'exact', head: true }).eq('allocation_made', true).eq('is_deleted', false),
+    const [poRes, faRes, cooRes, estatesRes, approvalsRes, refundsRes, offersRes, allocRes] = await Promise.all([
+      supabase.from('offers').select('id', { count: 'exact', head: true }).eq('is_deleted', false),
+      supabase.from('allocation_records').select('id', { count: 'exact', head: true }).eq('is_deleted', false),
       supabase.from('ownership_changes').select('id', { count: 'exact', head: true }),
       supabase.from('estates').select('id', { count: 'exact', head: true }).eq('is_deleted', false),
       supabase.from('approvals_expenditures').select('amount_approved').eq('is_deleted', false),
       supabase.from('refunds').select('amount_approved').eq('is_deleted', false),
-      supabase.from('subscribers').select('estate_id, property_type, estates(name)').eq('is_deleted', false),
+      supabase.from('offers').select('estate_id, property_type, estates(name)').eq('is_deleted', false),
+      supabase.from('allocation_records').select('estate_id, property_type, estates(name)').eq('is_deleted', false),
     ]);
 
     const totalApproved = (approvalsRes.data || []).reduce((s, r) => s + Number(r.amount_approved || 0), 0);
@@ -44,7 +45,7 @@ export default function Dashboard() {
 
     const estateMap = {};
     const ptMap = {};
-    (subsRes.data || []).forEach((r) => {
+    [...(offersRes.data || []), ...(allocRes.data || [])].forEach((r) => {
       const estateName = r.estates?.name || 'Unknown';
       estateMap[estateName] = (estateMap[estateName] || 0) + 1;
       const pt = r.property_type || 'Unspecified';
@@ -100,9 +101,9 @@ export default function Dashboard() {
 
       <div className="grid cols-2" style={{ marginTop: 16 }}>
         <div className="card">
-          <h3>Subscribers by Estate</h3>
+          <h3>Records by Estate</h3>
           {byEstate.length === 0 ? (
-            <p className="muted">No subscriber data yet.</p>
+            <p className="muted">No data yet.</p>
           ) : (
             <ResponsiveContainer width="100%" height={280}>
               <BarChart data={byEstate}>
@@ -116,9 +117,9 @@ export default function Dashboard() {
         </div>
 
         <div className="card">
-          <h3>Subscribers by Property Type</h3>
+          <h3>Records by Property Type</h3>
           {byPropertyType.length === 0 ? (
-            <p className="muted">No subscriber data yet.</p>
+            <p className="muted">No data yet.</p>
           ) : (
             <ResponsiveContainer width="100%" height={280}>
               <PieChart>
@@ -138,7 +139,8 @@ export default function Dashboard() {
       <div className="card">
         <h3>Quick Links</h3>
         <div className="flex wrap">
-          <Link className="btn btn-outline" to="/subscribers">Subscribers (PO / FA) Register</Link>
+          <Link className="btn btn-outline" to="/offers">Offers Register</Link>
+          <Link className="btn btn-outline" to="/allocations">Allocations Register</Link>
           <Link className="btn btn-outline" to="/coo">Ownership Changes (COO)</Link>
           <Link className="btn btn-outline" to="/estates">Manage Estates</Link>
           <Link className="btn btn-outline" to="/approvals">Approvals / Expenditure</Link>

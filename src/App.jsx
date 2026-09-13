@@ -7,7 +7,8 @@ import ChangePassword from './components/ChangePassword';
 import Dashboard from './components/Dashboard';
 import EstatesTab from './components/EstatesTab';
 import EstateDetail from './components/EstateDetail';
-import SubscribersTab from './components/SubscribersTab';
+import OffersTab from './components/OffersTab';
+import AllocationRecordsTab from './components/AllocationRecordsTab';
 import CooLogTab from './components/CooLogTab';
 import ApprovalsTab from './components/ApprovalsTab';
 import RefundsTab from './components/RefundsTab';
@@ -43,7 +44,8 @@ export default function App() {
         <nav>
           <NavLink to="/" end>Dashboard</NavLink>
           <NavLink to="/estates">Estates</NavLink>
-          <NavLink to="/subscribers">Subscribers (PO / FA)</NavLink>
+          <NavLink to="/offers">Offers</NavLink>
+          <NavLink to="/allocations">Allocations</NavLink>
           <NavLink to="/coo">Change of Ownership</NavLink>
           <NavLink to="/approvals">Approvals / Expenditure</NavLink>
           <NavLink to="/refunds">Refunds</NavLink>
@@ -74,7 +76,8 @@ export default function App() {
             <Route path="/" element={<Dashboard />} />
             <Route path="/estates" element={<EstatesTab />} />
             <Route path="/estates/:id" element={<EstateDetail />} />
-            <Route path="/subscribers" element={<SubscribersTab />} />
+            <Route path="/offers" element={<OffersTab />} />
+            <Route path="/allocations" element={<AllocationRecordsTab />} />
             <Route path="/coo" element={<CooLogTab />} />
             <Route path="/approvals" element={<ApprovalsTab />} />
             <Route path="/refunds" element={<RefundsTab />} />

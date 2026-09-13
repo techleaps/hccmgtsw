@@ -1,9 +1,9 @@
-# NAFILHCC Administrative Management System (v2)
+# NAFILHCC Administrative Management System (v3)
 
 A secure, online replacement for the manual Provisional Offer (PO), Final Allocation (FA),
 Change of Ownership (COO), Approvals/Expenditure, and Refunds registers — with role-based
 access, full audit logging, a supervisor approval workflow for edits/deletes, admin-defined
-custom columns and tabs, document uploads, and username-based sign-in.
+custom columns and tabs, document uploads, username-based sign-in, and bulk Excel import.
 
 Built with **free-tier services**, the same pattern as your Document Tracker:
 - **Supabase** (free tier) — database, authentication, security rules, file storage, serverless functions
@@ -11,24 +11,52 @@ Built with **free-tier services**, the same pattern as your Document Tracker:
 
 ---
 
-## What's new in v2
+## What's new in v3
 
-- **Username + password sign-in** — no email address needed. New accounts must set their own
-  password the first time they sign in.
-- **Auto sign-out after 1 minute idle** — protects the screen if someone walks away.
-- **Documents** — upload files and link them to a specific user and/or a specific record
-  (e.g. a scanned signed offer letter attached to a subscriber's record).
-- **Admin-defined custom columns** — add extra fields to the Subscribers, Approvals, Refunds
-  registers (or any custom tab) at any time, from the app itself — no developer needed.
-- **Admin-created custom tabs** — add a brand-new register/section to the sidebar (its own
-  admin-defined columns) without touching code.
-- **Subscribers register redesigned** to match your office register exactly: PON, Estate,
-  Property Type, Offer/Allocated checkboxes, Allocation Number, phone/email, Offer
-  Printed/Collected, Offer/Allocation Collected By, Amount Paid (Property/Infrastructure),
-  Legal/TDP, Comment, Remarks — with Change of Ownership recorded directly from a subscriber's
-  row.
-- Roles are now clearly assigned at account creation and shown on the Dashboard and in the top
-  bar for every signed-in user.
+- **Offers and Allocations are now two separate registers** (previously combined into one
+  "Subscribers" row), matching how your office actually tracks and prints them:
+  - **Offers**: Subscriber Name, Form No/PON, Property Type, Phone, Email, Offer Printed,
+    Offer Collected, Offer Collected By, Offer Collected On, Amount Paid, Comment, Remarks.
+  - **Allocations**: House No, Subscriber Name, Property Type, Printed, Signed, Collected,
+    Collected By, Date Collected, Phone Number, Remarks.
+  - Change of Ownership can be recorded from either register.
+- **No date field is required anywhere.** You can enter what you know today (names, amounts,
+  checkboxes) and come back to fill in exact dates later once you've checked the paper files.
+- **Bulk Import from Excel** — both the Offers and Allocations registers now have a
+  "Bulk Import from Excel" button. Pick the estate the file belongs to, upload your existing
+  spreadsheet, match its columns to the right fields (the system guesses this for you), preview,
+  and import — built for bringing in your existing 7,000+ subscriber records across all 13+
+  estates without typing each one in by hand. Import one estate's file at a time.
+
+## What was already in v2
+
+- Username + password sign-in (no email needed), forced password change on first sign-in.
+- Auto sign-out after 1 minute idle.
+- Document upload, linked to a user and/or a specific record.
+- Admin-defined custom columns on any register, and admin-created custom tabs for entirely
+  new record types.
+- Roles shown on the Dashboard and top bar for every signed-in user.
+
+---
+
+## IF YOU ALREADY HAVE v2 LIVE — read this first
+
+**Do not run `sql/schema.sql` on your existing project — it is for brand-new projects only.**
+
+To upgrade your live site without losing any data:
+
+1. In your Supabase project, open **SQL Editor → New query**.
+2. Open `sql/upgrade_v2_to_v3.sql` from this project, copy its entire contents, paste it in,
+   and click **Run**. This creates the two new "offers" and "allocation_records" tables and
+   copies every existing row into the right one(s) — nothing is deleted. Your original combined
+   data is additionally kept untouched in a table called `subscribers_legacy_v2` as a permanent
+   backup.
+3. Replace your deployed frontend code with this v3 folder, run `npm install` (to pick up the
+   new `xlsx` package used for bulk import), commit, and push — Vercel redeploys automatically.
+4. That's it — no changes needed to the edge function or to existing user accounts.
+
+If you're coming straight from v1 (skipped v2 entirely), run `sql/upgrade_v1_to_v2.sql` first,
+then `sql/upgrade_v2_to_v3.sql` — both are safe to run in sequence.
 
 ---
 
@@ -170,19 +198,24 @@ automatically to the **Audit Log**, with who did it and exactly what changed.
 
 - **Dashboard**: shows who's signed in and their role, plus totals for Offers/Allocations made,
   ownership changes, active estates, approved expenditure, approved refunds, and charts of
-  subscribers by estate and by property type.
+  records by estate and by property type.
 - **Estates**: Admins create estates here (name, category = site & services or carcass level)
   and define the list of property types for that estate (e.g. `3br, 4br, 500sqm, 1 hectare`) —
-  these automatically appear as a dropdown when anyone records a subscriber for that estate.
-- **Subscribers (PO / FA)**: the digital version of your office register — one row per
-  subscriber holding both their Offer and Allocation details (PON, Property Type, Offer made /
-  printed / collected, Allocation Number, Allocation collected by, phone, email, amounts paid,
-  Legal/TDP, comments, remarks). Filter by estate or by status (Offer made / Allocated / Both /
-  Neither), search, and click **Manage Columns** to add any extra field your office needs.
-- **Change of Ownership**: from a subscriber's row in the Subscribers register, click
-  **Record COO** — enter the new owner's name, reason, and (if reissued) a new PON/allocation
-  number. This logs full history under the **Change of Ownership** tab and updates the name on
-  the live record (subject to supervisor approval if a regular User does it).
+  these automatically appear as a dropdown when anyone records an offer or allocation for that
+  estate.
+- **Offers**: the digital version of your Offer register — Subscriber Name, Form No/PON,
+  Property Type, Phone, Email, Offer Printed/Collected, Offer Collected By/On, Amount Paid,
+  Comment, Remarks. Nothing here is required except Estate and Subscriber Name — dates and
+  everything else can be filled in later. Filter by estate or status, search, and click
+  **Manage Columns** to add any extra field your office needs, or **Bulk Import from Excel** to
+  load a whole estate's worth of offers at once (see Part 4a below).
+- **Allocations**: the digital version of your Allocation register — House No, Subscriber Name,
+  Property Type, Printed/Signed/Collected, Collected By, Date Collected, Phone Number, Remarks.
+  Same optional-dates rule, same **Manage Columns** and **Bulk Import from Excel** options.
+- **Change of Ownership**: from a row in either the Offers or Allocations register, click
+  **Record COO** — enter the new owner's name, reason, and (if reissued) a new Form No/House No.
+  This logs full history under the **Change of Ownership** tab and updates the name on the live
+  record (subject to supervisor approval if a regular User does it).
 - **Approvals / Expenditure**: title, purpose, category, optional estate, who applied, who was
   paid, amount applied vs approved, date. Filter by category or estate and see totals plus a
   bar chart of approved spend per category.
@@ -190,8 +223,8 @@ automatically to the **Audit Log**, with who did it and exactly what changed.
   account paid to, with running totals.
 - **Documents**: upload any file (e.g. a scanned signed letter, ID, or supporting document) and
   link it to a staff account and/or a specific record. Open it from **Documents** in the
-  sidebar, or from **Docs** next to any subscriber record, or from **Documents** next to any
-  user in **Users & Access**.
+  sidebar, or from **Docs** next to any offer/allocation record, or from **Documents** next to
+  any user in **Users & Access**.
 - **Custom Tabs** (Admins/Super Admins): add a completely new section to the sidebar for a
   record type not covered yet (e.g. "Site Visits", "Complaints"). Give it a name, then use
   **Manage Columns** to define its fields — it behaves like any other register (add, edit,
@@ -202,13 +235,41 @@ automatically to the **Audit Log**, with who did it and exactly what changed.
   only).
 
 ### Adding a custom column to an existing register
-Open **Subscribers**, **Approvals/Expenditure**, **Refunds**, or any custom tab → click
-**Manage Columns** → **Add a New Column** → give it a name and a type (Text, Number, Date,
+Open **Offers**, **Allocations**, **Approvals/Expenditure**, **Refunds**, or any custom tab →
+click **Manage Columns** → **Add a New Column** → give it a name and a type (Text, Number, Date,
 Dropdown, or Checkbox). It immediately appears as a field on the entry form and as an extra
 column in the table for everyone — no code changes, no downtime, and it never affects existing
 data.
 
 ---
+
+## PART 4a — Bulk importing your existing 7,000+ records from Excel
+
+Both **Offers** and **Allocations** have a **Bulk Import from Excel** button. Each file you
+import must belong to a single estate and a single register (Offers or Allocations) — so if
+you have separate spreadsheets per estate (e.g. `2br_payment.xlsx`, `ALLOCATION_-_2BR.xlsx`,
+etc.), import each one separately, picking the right estate each time.
+
+1. Click **Bulk Import from Excel** on the Offers or Allocations register.
+2. Select the **estate** this file belongs to.
+3. Upload the `.xlsx`/`.xls`/`.csv` file. The first row of the file should be column headers
+   (e.g. "Subscriber", "House No", "Printed", "Signed", "Collected", "Remarks").
+4. The system guesses which column matches which field — check the mapping and fix anything
+   it guessed wrong, or set a column to "Ignore this column" (useful for a "Serial" column,
+   which the system numbers automatically anyway).
+5. Preview the first few rows exactly as they'll be saved, then click **Import**.
+6. Rows missing the Subscriber Name are skipped automatically and reported in the summary at
+   the end — everything else imports even if some fields (like dates) are blank.
+
+For checkbox-style columns (Printed / Signed / Collected / Offer Printed / Offer Collected):
+any cell that isn't blank counts as "checked" — so a "✔", "P", "C", "X", or "Yes" in that
+column all work the same way. Names with typos, inconsistent titles, or spelling differences
+between your Offer and Allocation sheets are not auto-matched between the two registers — they
+import as separate rows exactly as written, and you can clean up duplicates or link them later
+using **Manage Columns** / manual edits if needed.
+
+---
+
 
 ## PART 5 — Keeping the live system safe during future upgrades
 
@@ -243,10 +304,11 @@ data.
 ```
 nafil-admin/
 ├── sql/schema.sql                       ← run once, brand-new Supabase projects only
-├── sql/upgrade_v1_to_v2.sql             ← run once on an existing live v1 project instead
+├── sql/upgrade_v1_to_v2.sql             ← run once on an existing live v1 project
+├── sql/upgrade_v2_to_v3.sql             ← run once on an existing live v2 project instead
 ├── supabase/functions/admin-create-user ← deploy once (or redeploy after upgrading) via Supabase CLI
 ├── src/
-│   ├── components/                      ← all screens (Dashboard, Estates, Subscribers, etc.)
+│   ├── components/                      ← all screens (Dashboard, Estates, Offers, Allocations, etc.)
 │   ├── lib/                             ← Supabase client, auth context, permission + custom-field helpers
 │   ├── App.jsx, main.jsx, styles.css
 ├── public/logo.jpeg                     ← your company logo

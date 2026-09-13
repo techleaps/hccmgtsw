@@ -22,13 +22,13 @@ export default function EstatesTab() {
     const { data } = await supabase.from('estates').select('*').eq('is_deleted', false).order('name');
     setEstates(data || []);
     if (data?.length) {
-      const { data: subs } = await supabase.from('subscribers').select('estate_id, offer_made, allocation_made').eq('is_deleted', false);
+      const [offersRes, allocRes] = await Promise.all([
+        supabase.from('offers').select('estate_id').eq('is_deleted', false),
+        supabase.from('allocation_records').select('estate_id').eq('is_deleted', false),
+      ]);
       const c = {};
-      (subs || []).forEach((s) => {
-        c[s.estate_id] = c[s.estate_id] || { PO: 0, FA: 0 };
-        if (s.offer_made) c[s.estate_id].PO += 1;
-        if (s.allocation_made) c[s.estate_id].FA += 1;
-      });
+      (offersRes.data || []).forEach((s) => { c[s.estate_id] = c[s.estate_id] || { PO: 0, FA: 0 }; c[s.estate_id].PO += 1; });
+      (allocRes.data || []).forEach((s) => { c[s.estate_id] = c[s.estate_id] || { PO: 0, FA: 0 }; c[s.estate_id].FA += 1; });
       setCounts(c);
     }
     setLoading(false);

@@ -29,21 +29,30 @@ $$ language sql stable security definer;
 
 grant execute on function get_login_email(text) to anon, authenticated;
 
--- make the new-user trigger aware of username + role passed at creation time
+-- make the new-user trigger aware of username + role passed at creation time,
+-- and never let a profile-row hiccup block auth account creation
 create or replace function handle_new_user()
 returns trigger as $$
 begin
   insert into public.profiles (id, full_name, email, username, role)
   values (
     new.id,
-    coalesce(new.raw_user_meta_data->>'full_name', new.email),
-    new.email,
+    coalesce(new.raw_user_meta_data->>'full_name', new.email, 'Unnamed User'),
+    coalesce(new.email, ''),
     new.raw_user_meta_data->>'username',
-    coalesce((new.raw_user_meta_data->>'role')::user_role, 'user')
-  );
+    case
+      when new.raw_user_meta_data->>'role' in ('super_admin','admin','supervisor','user')
+        then (new.raw_user_meta_data->>'role')::user_role
+      else 'user'::user_role
+    end
+  )
+  on conflict (id) do nothing;
+  return new;
+exception when others then
+  raise warning 'handle_new_user failed for %: %', new.id, sqlerrm;
   return new;
 end;
-$$ language plpgsql security definer;
+$$ language plpgsql security definer set search_path = public;
 
 -- ---------------------------------------------------------------
 -- 2. SUBSCRIBERS (new register, replaces the old PO/FA "allocations")

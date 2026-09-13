@@ -8,7 +8,8 @@ export default function EstateDetail() {
   const { isAdmin } = useAuth();
   const [estate, setEstate] = useState(null);
   const [types, setTypes] = useState([]);
-  const [subscribers, setSubscribers] = useState([]);
+  const [offers, setOffers] = useState([]);
+  const [allocations, setAllocations] = useState([]);
   const [newType, setNewType] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -18,14 +19,16 @@ export default function EstateDetail() {
 
   async function load() {
     setLoading(true);
-    const [estateRes, typesRes, allocRes] = await Promise.all([
+    const [estateRes, typesRes, offersRes, allocRes] = await Promise.all([
       supabase.from('estates').select('*').eq('id', id).single(),
       supabase.from('estate_property_types').select('*').eq('estate_id', id).order('property_type'),
-      supabase.from('subscribers').select('*').eq('estate_id', id).eq('is_deleted', false).order('serial_no'),
+      supabase.from('offers').select('*').eq('estate_id', id).eq('is_deleted', false).order('serial_no'),
+      supabase.from('allocation_records').select('*').eq('estate_id', id).eq('is_deleted', false).order('serial_no'),
     ]);
     setEstate(estateRes.data);
     setTypes(typesRes.data || []);
-    setSubscribers(allocRes.data || []);
+    setOffers(offersRes.data || []);
+    setAllocations(allocRes.data || []);
     setLoading(false);
   }
 
@@ -46,9 +49,6 @@ export default function EstateDetail() {
   if (loading) return <p className="muted">Loading…</p>;
   if (!estate) return <div className="empty-state">Estate not found.</div>;
 
-  const poCount = subscribers.filter((s) => s.offer_made).length;
-  const faCount = subscribers.filter((s) => s.allocation_made).length;
-
   return (
     <div>
       <div className="page-title">
@@ -59,13 +59,13 @@ export default function EstateDetail() {
       </div>
 
       <div className="grid cols-3">
-        <div className="stat-card blue"><div className="value">{poCount}</div><div className="label">Provisional Offers</div></div>
-        <div className="stat-card gold"><div className="value">{faCount}</div><div className="label">Final Allocations</div></div>
-        <div className="stat-card grey"><div className="value">{subscribers.length}</div><div className="label">Total Subscribers</div></div>
+        <div className="stat-card blue"><div className="value">{offers.length}</div><div className="label">Offers</div></div>
+        <div className="stat-card gold"><div className="value">{allocations.length}</div><div className="label">Allocations</div></div>
+        <div className="stat-card grey"><div className="value">{offers.length + allocations.length}</div><div className="label">Total Records</div></div>
       </div>
 
       <div className="card">
-        <h3>Property Types (used as dropdown when recording allocations here)</h3>
+        <h3>Property Types (used as dropdown when recording offers/allocations here)</h3>
         <div className="flex wrap">
           {types.map((t) => (
             <span key={t.id} className="tag PO" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -86,34 +86,47 @@ export default function EstateDetail() {
       </div>
 
       <div className="card">
-        <h3>Records in this Estate</h3>
+        <h3>Offers in this Estate</h3>
         <div className="flex wrap" style={{ marginBottom: 12 }}>
-          <Link className="btn btn-outline btn-sm" to="/subscribers">Manage Subscriber Records</Link>
+          <Link className="btn btn-outline btn-sm" to="/offers">Manage Offers</Link>
         </div>
         <div className="table-wrap">
           <table>
             <thead>
-              <tr>
-                <th>S/N</th><th>Subscriber</th><th>PON</th><th>Offer</th><th>Allocation No</th><th>Allocated</th>
-                <th>Property Type</th><th>Phone</th>
-              </tr>
+              <tr><th>S/N</th><th>Subscriber</th><th>Form No</th><th>Printed</th><th>Collected</th><th>Property Type</th><th>Phone</th></tr>
             </thead>
             <tbody>
-              {subscribers.map((s) => (
+              {offers.map((s) => (
                 <tr key={s.id}>
-                  <td>{s.serial_no}</td>
-                  <td>{s.subscriber_name}</td>
-                  <td>{s.pon}</td>
-                  <td>{s.offer_made ? '✓' : ''}</td>
-                  <td>{s.allocation_no}</td>
-                  <td>{s.allocation_made ? '✓' : ''}</td>
-                  <td>{s.property_type}</td>
-                  <td>{s.phone_number}</td>
+                  <td>{s.serial_no}</td><td>{s.subscriber_name}</td><td>{s.form_no}</td>
+                  <td>{s.offer_printed ? '✓' : ''}</td><td>{s.offer_collected ? '✓' : ''}</td>
+                  <td>{s.property_type}</td><td>{s.phone_number}</td>
                 </tr>
               ))}
-              {subscribers.length === 0 && (
-                <tr><td colSpan={8} className="empty-state">No subscriber records yet for this estate.</td></tr>
-              )}
+              {offers.length === 0 && <tr><td colSpan={7} className="empty-state">No offer records yet for this estate.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="card">
+        <h3>Allocations in this Estate</h3>
+        <div className="flex wrap" style={{ marginBottom: 12 }}>
+          <Link className="btn btn-outline btn-sm" to="/allocations">Manage Allocations</Link>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr><th>S/N</th><th>House No</th><th>Subscriber</th><th>Signed</th><th>Collected</th><th>Property Type</th></tr>
+            </thead>
+            <tbody>
+              {allocations.map((s) => (
+                <tr key={s.id}>
+                  <td>{s.serial_no}</td><td>{s.house_no}</td><td>{s.subscriber_name}</td>
+                  <td>{s.signed ? '✓' : ''}</td><td>{s.collected ? '✓' : ''}</td><td>{s.property_type}</td>
+                </tr>
+              ))}
+              {allocations.length === 0 && <tr><td colSpan={6} className="empty-state">No allocation records yet for this estate.</td></tr>}
             </tbody>
           </table>
         </div>

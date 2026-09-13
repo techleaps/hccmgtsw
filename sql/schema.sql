@@ -36,14 +36,23 @@ begin
   insert into public.profiles (id, full_name, email, username, role)
   values (
     new.id,
-    coalesce(new.raw_user_meta_data->>'full_name', new.email),
-    new.email,
+    coalesce(new.raw_user_meta_data->>'full_name', new.email, 'Unnamed User'),
+    coalesce(new.email, ''),
     new.raw_user_meta_data->>'username',
-    coalesce((new.raw_user_meta_data->>'role')::user_role, 'user')
-  );
+    case
+      when new.raw_user_meta_data->>'role' in ('super_admin','admin','supervisor','user')
+        then (new.raw_user_meta_data->>'role')::user_role
+      else 'user'::user_role
+    end
+  )
+  on conflict (id) do nothing;
+  return new;
+exception when others then
+  -- Never let a profile-row hiccup block Supabase from creating the auth account.
+  raise warning 'handle_new_user failed for %: %', new.id, sqlerrm;
   return new;
 end;
-$$ language plpgsql security definer;
+$$ language plpgsql security definer set search_path = public;
 
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
@@ -92,51 +101,60 @@ create table if not exists estate_property_types (
 );
 
 -- ---------------------------------------------------------------
--- 3. SUBSCRIBERS (PO / FA register, one row per subscriber)
+-- 3. OFFERS (Provisional Offer register) and ALLOCATION_RECORDS
+--    (Final Allocation register) — two separate registers, since
+--    the office tracks and prints them separately.
 -- ---------------------------------------------------------------
-create table if not exists subscribers (
+create table if not exists offers (
   id uuid primary key default uuid_generate_v4(),
   serial_no bigint generated always as identity,
   estate_id uuid not null references estates(id),
   subscriber_name text not null,
-  pon text,
-  file_number text,
+  form_no text,
   property_type text,
   phone_number text,
   email_address text,
-
-  offer_made boolean not null default false,
   offer_printed boolean not null default false,
   offer_collected boolean not null default false,
   offer_collected_by text,
   offer_collected_date date,
-  date_offer_signed date,
-
-  allocation_made boolean not null default false,
-  allocation_no text,
-  allocation_collected_by text,
-  allocation_collected_date date,
-  date_allocation_signed date,
-
-  amount_paid_property numeric(15,2) not null default 0,
-  amount_paid_infrastructure numeric(15,2) not null default 0,
-  legal_tdp text,
-
-  comments text,
+  amount_paid numeric(15,2) not null default 0,
+  comment text,
   remarks text,
   custom_data jsonb not null default '{}'::jsonb,
-
   created_by uuid references profiles(id),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   is_deleted boolean not null default false
 );
+create index if not exists idx_offers_estate on offers(estate_id);
 
-create index if not exists idx_subscribers_estate on subscribers(estate_id);
+create table if not exists allocation_records (
+  id uuid primary key default uuid_generate_v4(),
+  serial_no bigint generated always as identity,
+  estate_id uuid not null references estates(id),
+  subscriber_name text not null,
+  house_no text,
+  property_type text,
+  printed boolean not null default false,
+  signed boolean not null default false,
+  collected boolean not null default false,
+  collected_by text,
+  collected_date date,
+  phone_number text,
+  remarks text,
+  custom_data jsonb not null default '{}'::jsonb,
+  created_by uuid references profiles(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  is_deleted boolean not null default false
+);
+create index if not exists idx_allocrec_estate on allocation_records(estate_id);
 
 create table if not exists ownership_changes (
   id uuid primary key default uuid_generate_v4(),
-  subscriber_id uuid not null references subscribers(id) on delete cascade,
+  offer_id uuid references offers(id) on delete cascade,
+  allocation_record_id uuid references allocation_records(id) on delete cascade,
   previous_owner text not null,
   new_owner text not null,
   reason text,
@@ -160,7 +178,6 @@ create table if not exists approvals_expenditures (
   purpose text,
   category text,
   estate_id uuid references estates(id),
-  subscriber_id uuid references subscribers(id),
   application_by text,
   paid_to text,
   amount_applied numeric(15,2) default 0,
@@ -186,7 +203,6 @@ create table if not exists refunds (
   serial_no bigint generated always as identity,
   subscriber_name text not null,
   estate_id uuid references estates(id),
-  subscriber_id uuid references subscribers(id),
   reason text,
   refund_made_by text,
   account_to_be_paid text,
@@ -319,8 +335,12 @@ begin
 end;
 $$ language plpgsql security definer;
 
-drop trigger if exists trg_audit_subscribers on subscribers;
-create trigger trg_audit_subscribers after insert or update or delete on subscribers
+drop trigger if exists trg_audit_offers on offers;
+create trigger trg_audit_offers after insert or update or delete on offers
+  for each row execute procedure write_audit_log();
+
+drop trigger if exists trg_audit_allocation_records on allocation_records;
+create trigger trg_audit_allocation_records after insert or update or delete on allocation_records
   for each row execute procedure write_audit_log();
 
 drop trigger if exists trg_audit_ownership on ownership_changes;
@@ -414,7 +434,8 @@ $$ language plpgsql security definer;
 alter table profiles enable row level security;
 alter table estates enable row level security;
 alter table estate_property_types enable row level security;
-alter table subscribers enable row level security;
+alter table offers enable row level security;
+alter table allocation_records enable row level security;
 alter table ownership_changes enable row level security;
 alter table approvals_expenditures enable row level security;
 alter table refunds enable row level security;
@@ -450,14 +471,23 @@ create policy ept_write on estate_property_types for insert with check (is_admin
 drop policy if exists ept_delete on estate_property_types;
 create policy ept_delete on estate_property_types for delete using (is_admin_or_above());
 
-drop policy if exists sub_select on subscribers;
-create policy sub_select on subscribers for select using (auth.uid() is not null);
-drop policy if exists sub_insert on subscribers;
-create policy sub_insert on subscribers for insert with check (auth.uid() is not null);
-drop policy if exists sub_update on subscribers;
-create policy sub_update on subscribers for update using (is_supervisor_or_above());
-drop policy if exists sub_delete on subscribers;
-create policy sub_delete on subscribers for delete using (is_supervisor_or_above());
+drop policy if exists offers_select on offers;
+create policy offers_select on offers for select using (auth.uid() is not null);
+drop policy if exists offers_insert on offers;
+create policy offers_insert on offers for insert with check (auth.uid() is not null);
+drop policy if exists offers_update on offers;
+create policy offers_update on offers for update using (is_supervisor_or_above());
+drop policy if exists offers_delete on offers;
+create policy offers_delete on offers for delete using (is_supervisor_or_above());
+
+drop policy if exists allocrec_select on allocation_records;
+create policy allocrec_select on allocation_records for select using (auth.uid() is not null);
+drop policy if exists allocrec_insert on allocation_records;
+create policy allocrec_insert on allocation_records for insert with check (auth.uid() is not null);
+drop policy if exists allocrec_update on allocation_records;
+create policy allocrec_update on allocation_records for update using (is_supervisor_or_above());
+drop policy if exists allocrec_delete on allocation_records;
+create policy allocrec_delete on allocation_records for delete using (is_supervisor_or_above());
 
 drop policy if exists oc_select on ownership_changes;
 create policy oc_select on ownership_changes for select using (auth.uid() is not null);
