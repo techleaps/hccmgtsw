@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../lib/AuthContext';
 import { submitOrApplyUpdate, submitOrApplyDelete } from '../lib/recordActions';
 import { fetchCustomFields } from '../lib/customFields';
+import { blankToNull } from '../lib/sanitize';
 import ManageColumnsModal from './ManageColumnsModal';
 import { CustomFieldInputs, CustomFieldHeaders, CustomFieldCells } from './CustomFieldWidgets';
 
@@ -73,14 +74,14 @@ export default function RefundsTab() {
     setError('');
     if (!form.subscriber_name.trim()) { setError('Subscriber name is required.'); return; }
     setSaving(true);
-    const payload = {
+    const payload = blankToNull({
       ...form,
       estate_id: form.estate_id || null,
       amount_subscriber_has: Number(form.amount_subscriber_has) || 0,
       amount_requested: Number(form.amount_requested) || 0,
       amount_approved: Number(form.amount_approved) || 0,
       custom_data: customData,
-    };
+    }, ['date_of_approval']);
 
     if (editingRow) {
       const { error, requiresApproval } = await submitOrApplyUpdate({ profile, tableName: 'refunds', recordId: editingRow.id, changes: payload });

@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../lib/AuthContext';
 import { submitOrApplyUpdate, submitOrApplyDelete } from '../lib/recordActions';
 import { fetchCustomFields } from '../lib/customFields';
+import { blankToNull } from '../lib/sanitize';
 import ManageColumnsModal from './ManageColumnsModal';
 import BulkImportModal from './BulkImportModal';
 import { CustomFieldInputs, CustomFieldHeaders, CustomFieldCells } from './CustomFieldWidgets';
@@ -107,7 +108,7 @@ export default function OffersTab() {
       return;
     }
     setSaving(true);
-    const payload = { ...form, amount_paid: Number(form.amount_paid) || 0, custom_data: customData };
+    const payload = blankToNull({ ...form, amount_paid: Number(form.amount_paid) || 0, custom_data: customData }, ['offer_collected_date']);
 
     if (editingRow) {
       const { error, requiresApproval } = await submitOrApplyUpdate({ profile, tableName: 'offers', recordId: editingRow.id, changes: payload });
@@ -326,6 +327,7 @@ export default function OffersTab() {
           title="Bulk Import Offers"
           tableName="offers"
           fieldDefs={OFFER_FIELD_DEFS}
+          estates={estates}
           profile={profile}
           onClose={() => setShowImport(false)}
           onImported={load}

@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../lib/AuthContext';
 import { submitOrApplyUpdate, submitOrApplyDelete } from '../lib/recordActions';
 import { fetchCustomFields } from '../lib/customFields';
+import { blankToNull } from '../lib/sanitize';
 import ManageColumnsModal from './ManageColumnsModal';
 import BulkImportModal from './BulkImportModal';
 import { CustomFieldInputs, CustomFieldHeaders, CustomFieldCells } from './CustomFieldWidgets';
@@ -103,7 +104,7 @@ export default function AllocationRecordsTab() {
       return;
     }
     setSaving(true);
-    const payload = { ...form, custom_data: customData };
+    const payload = blankToNull({ ...form, custom_data: customData }, ['collected_date']);
 
     if (editingRow) {
       const { error, requiresApproval } = await submitOrApplyUpdate({ profile, tableName: 'allocation_records', recordId: editingRow.id, changes: payload });
@@ -316,6 +317,7 @@ export default function AllocationRecordsTab() {
           title="Bulk Import Allocations"
           tableName="allocation_records"
           fieldDefs={ALLOCATION_FIELD_DEFS}
+          estates={estates}
           profile={profile}
           onClose={() => setShowImport(false)}
           onImported={load}

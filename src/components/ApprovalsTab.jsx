@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../lib/AuthContext';
 import { submitOrApplyUpdate, submitOrApplyDelete } from '../lib/recordActions';
 import { fetchCustomFields } from '../lib/customFields';
+import { blankToNull } from '../lib/sanitize';
 import ManageColumnsModal from './ManageColumnsModal';
 import { CustomFieldInputs, CustomFieldHeaders, CustomFieldCells } from './CustomFieldWidgets';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
@@ -87,13 +88,13 @@ export default function ApprovalsTab() {
     setError('');
     if (!form.title.trim()) { setError('Title is required.'); return; }
     setSaving(true);
-    const payload = {
+    const payload = blankToNull({
       ...form,
       estate_id: form.estate_id || null,
       amount_applied: Number(form.amount_applied) || 0,
       amount_approved: Number(form.amount_approved) || 0,
       custom_data: customData,
-    };
+    }, ['date_of_approval']);
 
     if (editingRow) {
       const { error, requiresApproval } = await submitOrApplyUpdate({ profile, tableName: 'approvals_expenditures', recordId: editingRow.id, changes: payload });

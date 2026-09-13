@@ -38,9 +38,8 @@ function isChecked(value) {
   return s.length > 0;
 }
 
-export default function BulkImportModal({ title, tableName, fieldDefs, onClose, onImported, profile }) {
+export default function BulkImportModal({ title, tableName, fieldDefs, estates = [], onClose, onImported, profile }) {
   const [step, setStep] = useState('estate'); // estate -> upload -> mapping -> preview -> importing -> done
-  const [estates, setEstates] = useState([]);
   const [estateId, setEstateId] = useState('');
   const [fileName, setFileName] = useState('');
   const [headers, setHeaders] = useState([]);
@@ -49,10 +48,6 @@ export default function BulkImportModal({ title, tableName, fieldDefs, onClose, 
   const [error, setError] = useState('');
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [result, setResult] = useState(null);
-
-  React.useEffect(() => {
-    supabase.from('estates').select('*').eq('is_deleted', false).order('name').then(({ data }) => setEstates(data || []));
-  }, []);
 
   function handleFile(e) {
     setError('');
@@ -168,6 +163,11 @@ export default function BulkImportModal({ title, tableName, fieldDefs, onClose, 
                 <option value="">Select estate…</option>
                 {estates.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
               </select>
+              {estates.length === 0 && (
+                <p className="error-text" style={{ marginTop: 6 }}>
+                  No estates found. Go to the Estates tab and create one first, then come back here.
+                </p>
+              )}
             </div>
             <div className="modal-actions">
               <button type="button" className="btn btn-outline" onClick={onClose}>Cancel</button>
