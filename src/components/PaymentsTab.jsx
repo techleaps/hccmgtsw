@@ -22,13 +22,20 @@ const PAYMENT_TYPES = [
 ];
 
 export const PAYMENT_FIELD_DEFS = [
-  { key: 'subscriber_name', label: 'Subscriber Name', type: 'text', required: true, synonyms: ['subscriber', 'name'] },
-  { key: 'property_type', label: 'Property Type', type: 'text', synonyms: ['property type', 'type'] },
-  { key: 'payment_type', label: 'Payment Type (Property/Infrastructure/Legal_tdp/Other)', type: 'text', synonyms: ['payment type', 'fee type', 'category'] },
-  { key: 'amount', label: 'Amount', type: 'number', required: true, synonyms: ['amount', 'amount paid'] },
-  { key: 'date_paid', label: 'Date Paid', type: 'date', synonyms: ['date paid', 'date', 'payment date'] },
-  { key: 'payment_reference', label: 'Reference / Teller No', type: 'text', synonyms: ['reference', 'teller no', 'receipt no'] },
-  { key: 'remarks', label: 'Remarks', type: 'text', synonyms: ['remarks', 'comment', 'comments'] },
+  { key: 'subscriber_name', label: 'Subscriber Name', type: 'text', required: true,
+    synonyms: ['names', 'name', 'subscriber', 'subscriber name', 'full name'] },
+  { key: 'property_type', label: 'Property Type', type: 'text',
+    synonyms: ['property type', 'type', 'house type', 'unit type'] },
+  { key: 'payment_type', label: 'Payment Type (Property/Infrastructure/Legal_tdp/Other)', type: 'text',
+    synonyms: ['payment type', 'fee type', 'category'] },
+  { key: 'amount', label: 'Amount / Total Amount Paid', type: 'number', required: true,
+    synonyms: ['total amount paid', 'amount paid', 'total paid', 'amount', 'sum paid'] },
+  { key: 'date_paid', label: 'Date Paid', type: 'date',
+    synonyms: ['date paid', 'payment date', 'date'] },
+  { key: 'payment_reference', label: 'Reference / Teller No / Receipt No', type: 'text',
+    synonyms: ['receipt no', 'receipt number', 'teller no', 'reference', 'payment reference', 'ref no'] },
+  { key: 'remarks', label: 'Remarks', type: 'text',
+    synonyms: ['remarks', 'comment', 'comments', 'note', 'notes'] },
 ];
 
 function normalizePaymentType(v) {

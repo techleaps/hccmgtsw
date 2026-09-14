@@ -25,7 +25,8 @@ export const OFFER_FIELD_DEFS = [
   { key: 'offer_collected', label: 'Offer Collected', type: 'checkbox', synonyms: ['offer collected', 'collected'] },
   { key: 'offer_collected_by', label: 'Offer Collected By', type: 'text', synonyms: ['offer collected by', 'collected by', 'offer xcollected by'] },
   { key: 'offer_collected_date', label: 'Offer Collected On', type: 'date', synonyms: ['offer collected on', 'collected on', 'date collected'] },
-  { key: 'amount_paid', label: 'Amount Paid', type: 'number', synonyms: ['amount paid', 'amount'] },
+  { key: 'amount_paid', label: 'Amount Paid', type: 'number',
+    synonyms: ['total amount paid', 'amount paid', 'total paid', 'amount'] },
   { key: 'comment', label: 'Comment', type: 'text', synonyms: ['comment', 'comments'] },
   { key: 'remarks', label: 'Remarks', type: 'text', synonyms: ['remarks'] },
 ];

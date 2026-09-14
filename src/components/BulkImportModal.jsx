@@ -8,16 +8,49 @@ function normalize(s) {
   return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
+// Whole-word test so short tokens like "paid" or "name" do not steal longer headers.
+function hasWholeWord(haystack, needle) {
+  if (!needle) return false;
+  const re = new RegExp(`(?:^|\\s)${needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\s|$)`);
+  return re.test(haystack);
+}
+
 function guessMapping(headers, fieldDefs) {
   return headers.map((h) => {
     const norm = normalize(h);
+    // Always ignore pure serial / index columns and pure percentage columns
     if (!norm || norm === 'serial' || norm === 's n' || norm === 'sn') return IGNORE;
+    if (norm === 'paid' || norm === '% paid' || norm === 'percent paid' ||
+        norm === 'percentage paid' || norm === '%paid' || norm.endsWith(' % paid') ||
+        norm === 'balance due' || norm === 'balance' || norm === 'file no' || norm === 'file number') {
+      return IGNORE;
+    }
+
+    // 1. Exact synonym match (highest priority)
     for (const f of fieldDefs) {
       if (f.synonyms.some((syn) => normalize(syn) === norm)) return f.key;
     }
+
+    // 2. Prefer the longest synonym that is a whole-word substring of the header
+    //    (or vice-versa). This prevents "amount paid" matching "% Paid"
+    //    just because both contain the token "paid".
+    let bestKey = null;
+    let bestLen = 0;
     for (const f of fieldDefs) {
-      if (f.synonyms.some((syn) => norm.includes(normalize(syn)) || normalize(syn).includes(norm))) return f.key;
+      for (const syn of f.synonyms) {
+        const ns = normalize(syn);
+        if (!ns) continue;
+        const match =
+          (hasWholeWord(norm, ns) || hasWholeWord(ns, norm)) &&
+          ns.length >= 3; // ignore ultra-short tokens
+        if (match && ns.length > bestLen) {
+          bestLen = ns.length;
+          bestKey = f.key;
+        }
+      }
     }
+    if (bestKey) return bestKey;
+
     return IGNORE;
   });
 }
