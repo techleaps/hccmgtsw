@@ -11,6 +11,11 @@ import OffersEstatesTab from './components/OffersEstatesTab';
 import OffersTab from './components/OffersTab';
 import AllocationsEstatesTab from './components/AllocationsEstatesTab';
 import AllocationRecordsTab from './components/AllocationRecordsTab';
+import PaymentsEstatesTab from './components/PaymentsEstatesTab';
+import PaymentsTab from './components/PaymentsTab';
+import SubscriberProfile from './components/SubscriberProfile';
+import AnalysisEstatesTab from './components/AnalysisEstatesTab';
+import Analysis from './components/Analysis';
 import CooLogTab from './components/CooLogTab';
 import ApprovalsTab from './components/ApprovalsTab';
 import RefundsTab from './components/RefundsTab';
@@ -48,6 +53,8 @@ export default function App() {
           <NavLink to="/estates">Estates</NavLink>
           <NavLink to="/offers">Offers</NavLink>
           <NavLink to="/allocations">Allocations</NavLink>
+          <NavLink to="/payments">Payments</NavLink>
+          <NavLink to="/analysis">Payment Analysis</NavLink>
           <NavLink to="/coo">Change of Ownership</NavLink>
           <NavLink to="/approvals">Approvals / Expenditure</NavLink>
           <NavLink to="/refunds">Refunds</NavLink>
@@ -82,6 +89,11 @@ export default function App() {
             <Route path="/offers/:estateId" element={<OffersTab />} />
             <Route path="/allocations" element={<AllocationsEstatesTab />} />
             <Route path="/allocations/:estateId" element={<AllocationRecordsTab />} />
+            <Route path="/payments" element={<PaymentsEstatesTab />} />
+            <Route path="/payments/:estateId" element={<PaymentsTab />} />
+            <Route path="/subscriber/:estateId/:name" element={<SubscriberProfile />} />
+            <Route path="/analysis" element={<AnalysisEstatesTab />} />
+            <Route path="/analysis/:estateId" element={<Analysis />} />
             <Route path="/coo" element={<CooLogTab />} />
             <Route path="/approvals" element={<ApprovalsTab />} />
             <Route path="/refunds" element={<RefundsTab />} />

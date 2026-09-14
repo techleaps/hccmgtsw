@@ -96,6 +96,9 @@ create table if not exists estate_property_types (
   id uuid primary key default uuid_generate_v4(),
   estate_id uuid not null references estates(id) on delete cascade,
   property_type text not null,
+  expected_property_cost numeric(15,2),
+  expected_infrastructure_fee numeric(15,2),
+  expected_legal_tdp_fee numeric(15,2),
   created_at timestamptz not null default now(),
   unique (estate_id, property_type)
 );
@@ -133,7 +136,7 @@ create table if not exists allocation_records (
   id uuid primary key default uuid_generate_v4(),
   serial_no bigint generated always as identity,
   estate_id uuid not null references estates(id),
-  subscriber_name text not null,
+  subscriber_name text,
   house_no text,
   property_type text,
   printed boolean not null default false,
@@ -167,6 +170,26 @@ create table if not exists ownership_changes (
   created_by uuid references profiles(id),
   created_at timestamptz not null default now()
 );
+
+create table if not exists payments (
+  id uuid primary key default uuid_generate_v4(),
+  serial_no bigint generated always as identity,
+  estate_id uuid not null references estates(id),
+  subscriber_name text not null,
+  property_type text,
+  payment_type text not null default 'property',
+  amount numeric(15,2) not null default 0,
+  date_paid date,
+  payment_reference text,
+  remarks text,
+  custom_data jsonb not null default '{}'::jsonb,
+  created_by uuid references profiles(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  is_deleted boolean not null default false
+);
+create index if not exists idx_payments_estate on payments(estate_id);
+create index if not exists idx_payments_subscriber on payments(estate_id, lower(subscriber_name));
 
 -- ---------------------------------------------------------------
 -- 4. APPROVALS / EXPENDITURES
@@ -343,6 +366,10 @@ drop trigger if exists trg_audit_allocation_records on allocation_records;
 create trigger trg_audit_allocation_records after insert or update or delete on allocation_records
   for each row execute procedure write_audit_log();
 
+drop trigger if exists trg_audit_payments on payments;
+create trigger trg_audit_payments after insert or update or delete on payments
+  for each row execute procedure write_audit_log();
+
 drop trigger if exists trg_audit_ownership on ownership_changes;
 create trigger trg_audit_ownership after insert or update or delete on ownership_changes
   for each row execute procedure write_audit_log();
@@ -436,6 +463,7 @@ alter table estates enable row level security;
 alter table estate_property_types enable row level security;
 alter table offers enable row level security;
 alter table allocation_records enable row level security;
+alter table payments enable row level security;
 alter table ownership_changes enable row level security;
 alter table approvals_expenditures enable row level security;
 alter table refunds enable row level security;
@@ -468,6 +496,8 @@ drop policy if exists ept_select on estate_property_types;
 create policy ept_select on estate_property_types for select using (auth.uid() is not null);
 drop policy if exists ept_write on estate_property_types;
 create policy ept_write on estate_property_types for insert with check (is_admin_or_above());
+drop policy if exists ept_update on estate_property_types;
+create policy ept_update on estate_property_types for update using (is_admin_or_above());
 drop policy if exists ept_delete on estate_property_types;
 create policy ept_delete on estate_property_types for delete using (is_admin_or_above());
 
@@ -488,6 +518,15 @@ drop policy if exists allocrec_update on allocation_records;
 create policy allocrec_update on allocation_records for update using (is_supervisor_or_above());
 drop policy if exists allocrec_delete on allocation_records;
 create policy allocrec_delete on allocation_records for delete using (is_supervisor_or_above());
+
+drop policy if exists payments_select on payments;
+create policy payments_select on payments for select using (auth.uid() is not null);
+drop policy if exists payments_insert on payments;
+create policy payments_insert on payments for insert with check (auth.uid() is not null);
+drop policy if exists payments_update on payments;
+create policy payments_update on payments for update using (is_supervisor_or_above());
+drop policy if exists payments_delete on payments;
+create policy payments_delete on payments for delete using (is_supervisor_or_above());
 
 drop policy if exists oc_select on ownership_changes;
 create policy oc_select on ownership_changes for select using (auth.uid() is not null);

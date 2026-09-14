@@ -3,6 +3,8 @@ import { useParams, Link } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../lib/AuthContext';
 
+const BLANK_TYPE_FORM = { property_type: '', expected_property_cost: '', expected_infrastructure_fee: '', expected_legal_tdp_fee: '' };
+
 export default function EstateDetail() {
   const { id } = useParams();
   const { isAdmin } = useAuth();
@@ -10,7 +12,10 @@ export default function EstateDetail() {
   const [types, setTypes] = useState([]);
   const [offers, setOffers] = useState([]);
   const [allocations, setAllocations] = useState([]);
-  const [newType, setNewType] = useState('');
+  const [payments, setPayments] = useState([]);
+  const [newType, setNewType] = useState(BLANK_TYPE_FORM);
+  const [editingType, setEditingType] = useState(null);
+  const [editForm, setEditForm] = useState(BLANK_TYPE_FORM);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -19,35 +24,66 @@ export default function EstateDetail() {
 
   async function load() {
     setLoading(true);
-    const [estateRes, typesRes, offersRes, allocRes] = await Promise.all([
+    const [estateRes, typesRes, offersRes, allocRes, paymentsRes] = await Promise.all([
       supabase.from('estates').select('*').eq('id', id).single(),
       supabase.from('estate_property_types').select('*').eq('estate_id', id).order('property_type'),
       supabase.from('offers').select('*').eq('estate_id', id).eq('is_deleted', false).order('serial_no'),
       supabase.from('allocation_records').select('*').eq('estate_id', id).eq('is_deleted', false).order('serial_no'),
+      supabase.from('payments').select('id, amount').eq('estate_id', id).eq('is_deleted', false),
     ]);
     setEstate(estateRes.data);
     setTypes(typesRes.data || []);
     setOffers(offersRes.data || []);
     setAllocations(allocRes.data || []);
+    setPayments(paymentsRes.data || []);
     setLoading(false);
   }
 
   async function addType(e) {
     e.preventDefault();
-    if (!newType.trim()) return;
-    await supabase.from('estate_property_types').insert({ estate_id: id, property_type: newType.trim() });
-    setNewType('');
+    if (!newType.property_type.trim()) return;
+    await supabase.from('estate_property_types').insert({
+      estate_id: id,
+      property_type: newType.property_type.trim(),
+      expected_property_cost: newType.expected_property_cost === '' ? null : Number(newType.expected_property_cost),
+      expected_infrastructure_fee: newType.expected_infrastructure_fee === '' ? null : Number(newType.expected_infrastructure_fee),
+      expected_legal_tdp_fee: newType.expected_legal_tdp_fee === '' ? null : Number(newType.expected_legal_tdp_fee),
+    });
+    setNewType(BLANK_TYPE_FORM);
+    load();
+  }
+
+  function openEditType(t) {
+    setEditingType(t.id);
+    setEditForm({
+      property_type: t.property_type,
+      expected_property_cost: t.expected_property_cost ?? '',
+      expected_infrastructure_fee: t.expected_infrastructure_fee ?? '',
+      expected_legal_tdp_fee: t.expected_legal_tdp_fee ?? '',
+    });
+  }
+
+  async function saveEditType(typeId) {
+    await supabase.from('estate_property_types').update({
+      property_type: editForm.property_type.trim(),
+      expected_property_cost: editForm.expected_property_cost === '' ? null : Number(editForm.expected_property_cost),
+      expected_infrastructure_fee: editForm.expected_infrastructure_fee === '' ? null : Number(editForm.expected_infrastructure_fee),
+      expected_legal_tdp_fee: editForm.expected_legal_tdp_fee === '' ? null : Number(editForm.expected_legal_tdp_fee),
+    }).eq('id', typeId);
+    setEditingType(null);
     load();
   }
 
   async function removeType(typeId) {
-    if (!confirm('Remove this property type option?')) return;
+    if (!confirm('Remove this property type option? Existing records keep their property type text either way.')) return;
     await supabase.from('estate_property_types').delete().eq('id', typeId);
     load();
   }
 
   if (loading) return <p className="muted">Loading…</p>;
   if (!estate) return <div className="empty-state">Estate not found.</div>;
+
+  const totalPaid = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
 
   return (
     <div>
@@ -58,29 +94,74 @@ export default function EstateDetail() {
         </div>
       </div>
 
-      <div className="grid cols-3">
+      <div className="grid cols-4">
         <div className="stat-card blue"><div className="value">{offers.length}</div><div className="label">Offers</div></div>
         <div className="stat-card gold"><div className="value">{allocations.length}</div><div className="label">Allocations</div></div>
-        <div className="stat-card grey"><div className="value">{offers.length + allocations.length}</div><div className="label">Total Records</div></div>
+        <div className="stat-card grey"><div className="value">{payments.length}</div><div className="label">Payment Entries</div></div>
+        <div className="stat-card"><div className="value">₦{totalPaid.toLocaleString()}</div><div className="label">Total Paid (All Fee Types)</div></div>
       </div>
 
       <div className="card">
-        <h3>Property Types (used as dropdown when recording offers/allocations here)</h3>
-        <div className="flex wrap">
-          {types.map((t) => (
-            <span key={t.id} className="tag PO" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              {t.property_type}
-              {isAdmin && (
-                <span style={{ cursor: 'pointer', fontWeight: 900 }} onClick={() => removeType(t.id)}>×</span>
-              )}
-            </span>
-          ))}
-          {types.length === 0 && <span className="muted">No property types defined yet.</span>}
+        <h3>Property Types &amp; Expected Fees</h3>
+        <p className="muted">
+          These property types appear as a dropdown when recording offers/allocations/payments here. Setting the
+          expected Property Cost, Infrastructure Fee, and Legal/TDP Fee for each type lets the Subscriber Profile
+          and Analysis pages calculate accurate payment percentages — these fees vary by estate, so set them per
+          estate here.
+        </p>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Property Type</th><th>Expected Property Cost (₦)</th><th>Expected Infrastructure Fee (₦)</th><th>Expected Legal/TDP Fee (₦)</th><th></th></tr>
+            </thead>
+            <tbody>
+              {types.map((t) => (
+                <tr key={t.id}>
+                  {editingType === t.id ? (
+                    <>
+                      <td><input value={editForm.property_type} onChange={(e) => setEditForm({ ...editForm, property_type: e.target.value })} /></td>
+                      <td><input type="number" value={editForm.expected_property_cost} onChange={(e) => setEditForm({ ...editForm, expected_property_cost: e.target.value })} /></td>
+                      <td><input type="number" value={editForm.expected_infrastructure_fee} onChange={(e) => setEditForm({ ...editForm, expected_infrastructure_fee: e.target.value })} /></td>
+                      <td><input type="number" value={editForm.expected_legal_tdp_fee} onChange={(e) => setEditForm({ ...editForm, expected_legal_tdp_fee: e.target.value })} /></td>
+                      <td>
+                        <div className="flex">
+                          <button className="btn btn-primary btn-sm" onClick={() => saveEditType(t.id)}>Save</button>
+                          <button className="btn btn-outline btn-sm" onClick={() => setEditingType(null)}>Cancel</button>
+                        </div>
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td>{t.property_type}</td>
+                      <td className="right">{t.expected_property_cost != null ? Number(t.expected_property_cost).toLocaleString() : <span className="muted">Not set</span>}</td>
+                      <td className="right">{t.expected_infrastructure_fee != null ? Number(t.expected_infrastructure_fee).toLocaleString() : <span className="muted">Not set</span>}</td>
+                      <td className="right">{t.expected_legal_tdp_fee != null ? Number(t.expected_legal_tdp_fee).toLocaleString() : <span className="muted">Not set</span>}</td>
+                      <td>
+                        {isAdmin && (
+                          <div className="flex">
+                            <button className="btn btn-outline btn-sm" onClick={() => openEditType(t)}>Edit</button>
+                            <button className="btn btn-danger btn-sm" onClick={() => removeType(t.id)}>Remove</button>
+                          </div>
+                        )}
+                      </td>
+                    </>
+                  )}
+                </tr>
+              ))}
+              {types.length === 0 && <tr><td colSpan={5} className="empty-state">No property types defined yet.</td></tr>}
+            </tbody>
+          </table>
         </div>
+
         {isAdmin && (
-          <form onSubmit={addType} className="flex" style={{ marginTop: 12, maxWidth: 400 }}>
-            <input value={newType} onChange={(e) => setNewType(e.target.value)} placeholder="e.g. 3br, 500sqm" />
-            <button className="btn btn-primary btn-sm">Add</button>
+          <form onSubmit={addType} style={{ marginTop: 16 }}>
+            <div className="grid cols-4">
+              <div className="field"><label>New Property Type</label><input value={newType.property_type} onChange={(e) => setNewType({ ...newType, property_type: e.target.value })} placeholder="e.g. 3br, 500sqm" /></div>
+              <div className="field"><label>Expected Property Cost (₦)</label><input type="number" value={newType.expected_property_cost} onChange={(e) => setNewType({ ...newType, expected_property_cost: e.target.value })} placeholder="optional" /></div>
+              <div className="field"><label>Expected Infrastructure Fee (₦)</label><input type="number" value={newType.expected_infrastructure_fee} onChange={(e) => setNewType({ ...newType, expected_infrastructure_fee: e.target.value })} placeholder="optional" /></div>
+              <div className="field"><label>Expected Legal/TDP Fee (₦)</label><input type="number" value={newType.expected_legal_tdp_fee} onChange={(e) => setNewType({ ...newType, expected_legal_tdp_fee: e.target.value })} placeholder="optional" /></div>
+            </div>
+            <button className="btn btn-primary btn-sm">Add Property Type</button>
           </form>
         )}
       </div>
@@ -122,13 +203,21 @@ export default function EstateDetail() {
             <tbody>
               {allocations.map((s) => (
                 <tr key={s.id}>
-                  <td>{s.serial_no}</td><td>{s.house_no}</td><td>{s.subscriber_name}</td>
+                  <td>{s.serial_no}</td><td>{s.house_no}</td><td>{s.subscriber_name || <span className="tag rejected">Vacant</span>}</td>
                   <td>{s.signed ? '✓' : ''}</td><td>{s.collected ? '✓' : ''}</td><td>{s.property_type}</td>
                 </tr>
               ))}
               {allocations.length === 0 && <tr><td colSpan={6} className="empty-state">No allocation records yet for this estate.</td></tr>}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <div className="card">
+        <h3>Payments in this Estate</h3>
+        <div className="flex wrap">
+          <Link className="btn btn-outline btn-sm" to={`/payments/${id}`}>Manage Payments</Link>
+          <Link className="btn btn-outline btn-sm" to={`/analysis/${id}`}>View Payment Analysis</Link>
         </div>
       </div>
     </div>

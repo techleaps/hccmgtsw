@@ -1,9 +1,10 @@
-# NAFILHCC Administrative Management System (v3)
+# NAFILHCC Administrative Management System (v4)
 
 A secure, online replacement for the manual Provisional Offer (PO), Final Allocation (FA),
 Change of Ownership (COO), Approvals/Expenditure, and Refunds registers — with role-based
 access, full audit logging, a supervisor approval workflow for edits/deletes, admin-defined
-custom columns and tabs, document uploads, username-based sign-in, and bulk Excel import.
+custom columns and tabs, document uploads, username-based sign-in, bulk Excel import, a
+Payments ledger, and a payment-percentage analysis tool.
 
 Built with **free-tier services**, the same pattern as your Document Tracker:
 - **Supabase** (free tier) — database, authentication, security rules, file storage, serverless functions
@@ -11,31 +12,70 @@ Built with **free-tier services**, the same pattern as your Document Tracker:
 
 ---
 
-## What's new in v3
+## What's new in v4
 
-- **Offers and Allocations are now two separate registers** (previously combined into one
-  "Subscribers" row), matching how your office actually tracks and prints them:
-  - **Offers**: Subscriber Name, Form No/PON, Property Type, Phone, Email, Offer Printed,
-    Offer Collected, Offer Collected By, Offer Collected On, Amount Paid, Comment, Remarks.
-  - **Allocations**: House No, Subscriber Name, Property Type, Printed, Signed, Collected,
-    Collected By, Date Collected, Phone Number, Remarks.
-  - Change of Ownership can be recorded from either register.
-- **No date field is required anywhere.** You can enter what you know today (names, amounts,
-  checkboxes) and come back to fill in exact dates later once you've checked the paper files.
-- **Bulk Import from Excel** — both the Offers and Allocations registers now have a
-  "Bulk Import from Excel" button. Pick the estate the file belongs to, upload your existing
-  spreadsheet, match its columns to the right fields (the system guesses this for you), preview,
-  and import — built for bringing in your existing 7,000+ subscriber records across all 13+
-  estates without typing each one in by hand. Import one estate's file at a time.
+- **Vacant/unallocated units can now be captured in Allocations.** A House No with no
+  Subscriber Name is allowed — use this for units with a defect, bad structure, erosion,
+  hillside location, etc. that can't be allocated yet. They show a "Vacant" tag and can be
+  filtered separately. Once assigned, just edit the record and add the name.
+- **Payments register** — a running ledger of every amount a subscriber has paid, tagged as
+  **Property**, **Infrastructure**, or **Legal/TDP** (tracked separately, since infra/TDP is
+  not part of the property cost). Same estate-by-estate layout, Manage Columns, and Bulk
+  Import from Excel as Offers/Allocations.
+- **Per-estate, per-property-type fee configuration** — since Property Cost, Infrastructure
+  Fee, and Legal/TDP Fee vary from estate to estate (and by property type within an estate),
+  set the expected amount for each under **Estates → (an estate) → Property Types & Expected
+  Fees**. This powers accurate percentage calculations everywhere else.
+- **Subscriber Profile** — click any subscriber's name (in Offers, Allocations, Payments, or
+  Analysis) to see a full report: property type(s)/house no, offer & allocation status and who
+  collected them, phone/email, a Property/Infrastructure/Legal-TDP payment breakdown with
+  expected vs paid vs balance vs %, full payment history, and every comment/remark on file for
+  that person in that estate.
+- **Payment Analysis** — pick an estate (Sidebar → Payment Analysis) to see how many
+  subscribers have paid 100%+, 60–99%, or below 60% of the expected property cost, each broken
+  down by whether they've been allocated yet — built to answer exactly: who should be prioritized
+  for housing (100%+, no allocation), who to follow up with to complete payment (60–99%), and
+  who to consider for the refund conversation (below 60%).
+- **Clear All Records for This Estate** (Admins only) — on Offers, Allocations, and Payments,
+  to wipe one estate's records in one register before re-importing a corrected file. This is a
+  soft delete (recoverable via the Audit Log), and only affects the one estate/register you're
+  in.
+- Bulk Import fixes: percentage-formatted cells (e.g. "100%") now import as text correctly
+  instead of the raw underlying number; you can set a **Default Property Type** for files that
+  don't have that column; and the preview screen now shows every row with a checkbox so you can
+  exclude section-divider or repeated-header rows before importing.
 
-## What was already in v2
+## What was already in v3 and earlier
 
-- Username + password sign-in (no email needed), forced password change on first sign-in.
-- Auto sign-out after 1 minute idle.
+- Offers and Allocations as two separate registers, reached estate-by-estate (click an estate
+  card, like the Estates page, to manage just that estate's records with its own serial numbers).
+- Dashboard is fully clickable through to the relevant register/estate.
+- No date field is required anywhere — fill them in later if you don't have them yet.
+- Username + password sign-in (no email needed), forced password change on first sign-in, auto
+  sign-out after 1 minute idle.
 - Document upload, linked to a user and/or a specific record.
 - Admin-defined custom columns on any register, and admin-created custom tabs for entirely
   new record types.
 - Roles shown on the Dashboard and top bar for every signed-in user.
+
+---
+
+## IF YOU ALREADY HAVE v3 LIVE — read this first
+
+**Do not run `sql/schema.sql` on your existing project — it is for brand-new projects only.**
+
+To upgrade your live site without losing any data:
+
+1. In your Supabase project, open **SQL Editor → New query**.
+2. Open `sql/upgrade_v3_to_v4.sql` from this project, copy its entire contents, paste it in,
+   and click **Run**. This makes Allocation subscriber names optional, adds the new "payments"
+   table, and adds the three expected-fee columns to estate property types — nothing existing
+   is touched or deleted.
+3. Replace your deployed frontend code with this v4 folder, commit, and push — Vercel
+   redeploys automatically. No new npm packages this time.
+
+If you're not yet on v3, run `sql/upgrade_v1_to_v2.sql`, then `sql/upgrade_v2_to_v3.sql`, then
+`sql/upgrade_v3_to_v4.sql`, in that order — all three are safe to run in sequence.
 
 ---
 
@@ -305,7 +345,8 @@ using **Manage Columns** / manual edits if needed.
 nafil-admin/
 ├── sql/schema.sql                       ← run once, brand-new Supabase projects only
 ├── sql/upgrade_v1_to_v2.sql             ← run once on an existing live v1 project
-├── sql/upgrade_v2_to_v3.sql             ← run once on an existing live v2 project instead
+├── sql/upgrade_v2_to_v3.sql             ← run once on an existing live v2 project
+├── sql/upgrade_v3_to_v4.sql             ← run once on an existing live v3 project instead
 ├── supabase/functions/admin-create-user ← deploy once (or redeploy after upgrading) via Supabase CLI
 ├── src/
 │   ├── components/                      ← all screens (Dashboard, Estates, Offers, Allocations, etc.)

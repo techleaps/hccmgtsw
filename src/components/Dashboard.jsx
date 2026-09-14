@@ -150,6 +150,8 @@ export default function Dashboard() {
         <div className="flex wrap">
           <Link className="btn btn-outline" to="/offers">Offers Register</Link>
           <Link className="btn btn-outline" to="/allocations">Allocations Register</Link>
+          <Link className="btn btn-outline" to="/payments">Payments Register</Link>
+          <Link className="btn btn-outline" to="/analysis">Payment Analysis</Link>
           <Link className="btn btn-outline" to="/coo">Ownership Changes (COO)</Link>
           <Link className="btn btn-outline" to="/estates">Manage Estates</Link>
           <Link className="btn btn-outline" to="/approvals">Approvals / Expenditure</Link>

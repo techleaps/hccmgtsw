@@ -231,7 +231,7 @@ export default function OffersTab() {
               {filtered.map((r) => (
                 <tr key={r.id}>
                   <td>{r.localSerial}</td>
-                  <td>{r.subscriber_name}</td>
+                  <td><Link to={`/subscriber/${estateId}/${encodeURIComponent(r.subscriber_name)}`}>{r.subscriber_name}</Link></td>
                   <td>{r.form_no}</td>
                   <td>{r.property_type}</td>
                   <td>{r.phone_number}</td>

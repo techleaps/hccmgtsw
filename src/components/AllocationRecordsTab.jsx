@@ -16,8 +16,8 @@ const BLANK = {
 };
 
 export const ALLOCATION_FIELD_DEFS = [
-  { key: 'subscriber_name', label: 'Subscriber Name', type: 'text', required: true, synonyms: ['subscriber', 'name'] },
-  { key: 'house_no', label: 'House No', type: 'text', synonyms: ['house no', 'house number', 'allocation no', 'plot no'] },
+  { key: 'house_no', label: 'House No', type: 'text', required: true, synonyms: ['house no', 'house number', 'allocation no', 'plot no'] },
+  { key: 'subscriber_name', label: 'Subscriber Name', type: 'text', synonyms: ['subscriber', 'name'] },
   { key: 'property_type', label: 'Property Type', type: 'text', synonyms: ['property type', 'type'] },
   { key: 'printed', label: 'Printed', type: 'checkbox', synonyms: ['printed'] },
   { key: 'signed', label: 'Signed', type: 'checkbox', synonyms: ['signed'] },
@@ -74,7 +74,8 @@ export default function AllocationRecordsTab() {
       if (statusFilter === 'signed' && !r.signed) return false;
       if (statusFilter === 'collected' && !r.collected) return false;
       if (statusFilter === 'pending' && r.collected) return false;
-      const hay = `${r.subscriber_name} ${r.house_no || ''} ${r.phone_number || ''}`.toLowerCase();
+      if (statusFilter === 'vacant' && r.subscriber_name) return false;
+      const hay = `${r.subscriber_name || ''} ${r.house_no || ''} ${r.phone_number || ''}`.toLowerCase();
       return hay.includes(search.toLowerCase());
     });
   }, [numbered, statusFilter, search]);
@@ -83,6 +84,7 @@ export default function AllocationRecordsTab() {
     total: filtered.length,
     signed: filtered.filter((r) => r.signed).length,
     collected: filtered.filter((r) => r.collected).length,
+    vacant: filtered.filter((r) => !r.subscriber_name).length,
   }), [filtered]);
 
   function openNew() { setEditingRow(null); setForm(BLANK); setCustomData({}); setError(''); setShowModal(true); }
@@ -101,7 +103,10 @@ export default function AllocationRecordsTab() {
   async function handleSave(e) {
     e.preventDefault();
     setError('');
-    if (!form.subscriber_name.trim()) { setError('Subscriber Name is required.'); return; }
+    if (!form.house_no.trim() && !form.subscriber_name.trim()) {
+      setError('Enter at least a House No or a Subscriber Name.');
+      return;
+    }
     setSaving(true);
     const payload = blankToNull({ ...form, custom_data: customData }, ['collected_date']);
 
@@ -185,10 +190,11 @@ export default function AllocationRecordsTab() {
         </div>
       </div>
 
-      <div className="grid cols-3">
+      <div className="grid cols-4">
         <div className="stat-card"><div className="value">{summary.total}</div><div className="label">Allocations Shown</div></div>
         <div className="stat-card blue"><div className="value">{summary.signed}</div><div className="label">Signed</div></div>
         <div className="stat-card gold"><div className="value">{summary.collected}</div><div className="label">Collected</div></div>
+        <div className="stat-card grey"><div className="value">{summary.vacant}</div><div className="label">Vacant / Unallocated</div></div>
       </div>
 
       <div className="card">
@@ -200,6 +206,7 @@ export default function AllocationRecordsTab() {
               <option value="signed">Signed</option>
               <option value="collected">Collected</option>
               <option value="pending">Not Yet Collected</option>
+              <option value="vacant">Vacant / Unallocated</option>
             </select>
           </div>
           <div style={{ minWidth: 220, flex: 1 }}>
@@ -225,7 +232,7 @@ export default function AllocationRecordsTab() {
                 <tr key={r.id}>
                   <td>{r.localSerial}</td>
                   <td>{r.house_no}</td>
-                  <td>{r.subscriber_name}</td>
+                  <td>{r.subscriber_name ? <Link to={`/subscriber/${estateId}/${encodeURIComponent(r.subscriber_name)}`}>{r.subscriber_name}</Link> : <span className="tag rejected">Vacant</span>}</td>
                   <td>{r.property_type}</td>
                   <td>{r.printed ? '✓' : ''}</td>
                   <td>{r.signed ? '✓' : ''}</td>
@@ -238,14 +245,14 @@ export default function AllocationRecordsTab() {
                   <td>
                     <div className="flex wrap">
                       <button className="btn btn-outline btn-sm" onClick={() => openEdit(r)}>Edit</button>
-                      <button className="btn btn-outline btn-sm" onClick={() => openCoo(r)}>Record COO</button>
+                      {r.subscriber_name && <button className="btn btn-outline btn-sm" onClick={() => openCoo(r)}>Record COO</button>}
                       <Link className="btn btn-outline btn-sm" to={`/documents?linkedTable=allocation_records&linkedRecordId=${r.id}`}>Docs</Link>
                       <button className="btn btn-danger btn-sm" onClick={() => handleDelete(r)}>Delete</button>
                     </div>
                   </td>
                 </tr>
               ))}
-              {filtered.length === 0 && <tr><td colSpan={13 + customFields.length} className="empty-state">No allocation records found.</td></tr>}
+              {filtered.length === 0 && <tr><td colSpan={12 + customFields.length} className="empty-state">No allocation records found.</td></tr>}
             </tbody>
           </table>
         )}
@@ -258,8 +265,11 @@ export default function AllocationRecordsTab() {
             <h3>{editingRow ? 'Edit Allocation Record' : `New Allocation — ${estate?.name || ''}`}</h3>
             <form onSubmit={handleSave}>
               <div className="grid cols-2">
-                <div className="field" style={{ gridColumn: 'span 2' }}><label>Subscriber Name</label><input value={form.subscriber_name} onChange={(e) => setForm({ ...form, subscriber_name: e.target.value })} required /></div>
-                <div className="field"><label>House No</label><input value={form.house_no} onChange={(e) => setForm({ ...form, house_no: e.target.value })} /></div>
+                <div className="field" style={{ gridColumn: 'span 2' }}><label>House No</label><input value={form.house_no} onChange={(e) => setForm({ ...form, house_no: e.target.value })} /></div>
+                <div className="field" style={{ gridColumn: 'span 2' }}>
+                  <label>Subscriber Name <span className="muted" style={{ fontWeight: 400 }}>(leave blank if not yet allocated to anyone — e.g. defect, bad structure, erosion, hillside location)</span></label>
+                  <input value={form.subscriber_name} onChange={(e) => setForm({ ...form, subscriber_name: e.target.value })} />
+                </div>
                 <div className="field"><label>Property Type</label><input value={form.property_type} onChange={(e) => setForm({ ...form, property_type: e.target.value })} placeholder="e.g. 3BR, 4BR Fully" /></div>
                 <div className="field"><label>Phone Number</label><input value={form.phone_number} onChange={(e) => setForm({ ...form, phone_number: e.target.value })} /></div>
               </div>

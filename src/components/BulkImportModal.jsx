@@ -41,13 +41,16 @@ function isChecked(value) {
 // A row that's really a section-divider / repeated-header / estate-name banner
 // (common in hand-maintained registers) rather than an actual subscriber row.
 function looksLikeJunkRow(record, requiredKey, knownEstateNames) {
-  const val = String(record[requiredKey] ?? '').trim().toLowerCase();
-  if (!val) return true;
-  if (knownEstateNames.some((n) => n.toLowerCase() === val)) return true;
-  return false;
+  const requiredVal = String(record[requiredKey] ?? '').trim();
+  if (!requiredVal) return true;
+  const lowerEstateNames = knownEstateNames.map((n) => n.toLowerCase());
+  return Object.values(record).some((v) => {
+    const s = String(v ?? '').trim().toLowerCase();
+    return s && lowerEstateNames.includes(s);
+  });
 }
 
-export default function BulkImportModal({ title, tableName, fieldDefs, estates = [], presetEstateId, onClose, onImported, profile }) {
+export default function BulkImportModal({ title, tableName, fieldDefs, estates = [], presetEstateId, onClose, onImported, profile, transformRecord }) {
   const [step, setStep] = useState(presetEstateId ? 'upload' : 'estate');
   const [estateId, setEstateId] = useState(presetEstateId || '');
   const [defaultPropertyType, setDefaultPropertyType] = useState('');
@@ -132,7 +135,7 @@ export default function BulkImportModal({ title, tableName, fieldDefs, estates =
       if (hasPropertyTypeField && defaultPropertyType.trim() && !rec.property_type) {
         rec.property_type = defaultPropertyType.trim();
       }
-      return rec;
+      return transformRecord ? transformRecord(rec) : rec;
     });
   }
 
@@ -142,7 +145,7 @@ export default function BulkImportModal({ title, tableName, fieldDefs, estates =
 
   const allRecords = useMemo(
     () => buildRecords(rowsRaw, rowsDisplay, headers, mapping, fieldDefs),
-    [rowsRaw, rowsDisplay, headers, mapping, fieldDefs, defaultPropertyType]
+    [rowsRaw, rowsDisplay, headers, mapping, fieldDefs, defaultPropertyType, transformRecord]
   );
 
   function goToPreview() {
@@ -161,11 +164,12 @@ export default function BulkImportModal({ title, tableName, fieldDefs, estates =
 
   const flaggedCount = allRecords.filter((r) => looksLikeJunkRow(r, requiredKey, knownEstateNames)).length;
   const visibleFields = fieldDefs.filter((f) => mapping.includes(f.key));
+  const importableCount = allRecords.filter((r, i) => included[i] && String(r[requiredKey] ?? '').trim()).length;
 
   async function handleImport() {
     setStep('importing');
     setError('');
-    const toImport = allRecords.filter((_, i) => included[i]);
+    const toImport = allRecords.filter((r, i) => included[i] && String(r[requiredKey] ?? '').trim());
     const skipped = allRecords.length - toImport.length;
     const CHUNK = 300;
     let imported = 0;
@@ -331,7 +335,7 @@ export default function BulkImportModal({ title, tableName, fieldDefs, estates =
             <div className="modal-actions">
               <button type="button" className="btn btn-outline" onClick={() => setStep('mapping')}>Back</button>
               <button type="button" className="btn btn-primary" onClick={handleImport}>
-                Import {included.filter(Boolean).length} Rows
+                Import {importableCount} Rows
               </button>
             </div>
           </div>
