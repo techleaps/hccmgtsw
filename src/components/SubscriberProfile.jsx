@@ -44,15 +44,17 @@ export default function SubscriberProfile() {
   const phone = offers.find((o) => o.phone_number)?.phone_number || allocations.find((a) => a.phone_number)?.phone_number;
   const email = offers.find((o) => o.email_address)?.email_address;
 
-  // Normalise payment_type: blank / null / unknown → treat as 'property' (summary imports)
+  // Normalise payment_type for SUMMARY totals.
+  // Blank / null / "other" → property, because bulk Excel imports had no Payment Type
+  // column and previously landed as "other". Explicit infrastructure / legal_tdp stay as-is.
   function effectiveType(t) {
     const s = String(t || '').toLowerCase().trim();
-    if (!s || s === 'null' || s === 'undefined') return 'property';
+    if (!s || s === 'null' || s === 'undefined' || s === 'other') return 'property';
     if (s.includes('infra')) return 'infrastructure';
     if (s.includes('legal') || s.includes('tdp')) return 'legal_tdp';
     if (s.includes('prop')) return 'property';
-    if (['property', 'infrastructure', 'legal_tdp', 'other'].includes(s)) return s;
-    return 'other';
+    if (['property', 'infrastructure', 'legal_tdp'].includes(s)) return s;
+    return 'property'; // unknown labels also count toward property
   }
 
   const paidByType = { property: 0, infrastructure: 0, legal_tdp: 0, other: 0 };
@@ -138,25 +140,19 @@ export default function SubscriberProfile() {
                 const exp = expected[t];
                 const paid = paidByType[t] || 0;
                 const pct = exp > 0 ? Math.round((paid / exp) * 100) : null;
+                const balance = exp > 0 ? exp - paid : null; // can be negative when overpaid
                 return (
                   <tr key={t}>
                     <td>{PAYMENT_TYPE_LABELS[t]}</td>
                     <td className="right">{exp > 0 ? exp.toLocaleString() : <span className="muted">Not configured</span>}</td>
                     <td className="right">{paid > 0 ? paid.toLocaleString() : '0'}</td>
-                    <td className="right">{exp > 0 ? Math.max(exp - paid, 0).toLocaleString() : '—'}</td>
+                    <td className="right">
+                      {balance === null ? '—' : balance.toLocaleString()}
+                    </td>
                     <td>{pct !== null ? `${pct}%` : '—'}</td>
                   </tr>
                 );
               })}
-              {paidByType.other > 0 && (
-                <tr>
-                  <td>Other</td>
-                  <td className="right">—</td>
-                  <td className="right">{paidByType.other.toLocaleString()}</td>
-                  <td className="right">—</td>
-                  <td>—</td>
-                </tr>
-              )}
             </tbody>
           </table>
         </div>
@@ -165,13 +161,6 @@ export default function SubscriberProfile() {
             No expected fee amounts are configured yet for {propertyTypes.join(', ') || 'this property type'} in {estate?.name}.
             Go to <b>Estates → {estate?.name} → Property Types</b> and enter the Expected Property Cost,
             Infrastructure Fee and Legal/TDP Fee so percentages can be calculated.
-          </p>
-        )}
-        {paidByType.other > 0 && (
-          <p className="muted" style={{ marginTop: 8 }}>
-            Some payments are stored as type <b>Other</b>. If they are actually property payments
-            (common after an earlier import), edit them on the Payments tab and set Type = Property,
-            or re-import the Excel after this update (new imports default to Property).
           </p>
         )}
       </div>
