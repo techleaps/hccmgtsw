@@ -35,15 +35,31 @@ export default function SubscriberProfile() {
 
   if (loading) return <p className="muted">Loading…</p>;
 
+  // Collect property types from every source so the profile still works when only payments exist
   const propertyTypes = [...new Set([
     ...offers.map((o) => o.property_type).filter(Boolean),
     ...allocations.map((a) => a.property_type).filter(Boolean),
+    ...payments.map((p) => p.property_type).filter(Boolean),
   ])];
   const phone = offers.find((o) => o.phone_number)?.phone_number || allocations.find((a) => a.phone_number)?.phone_number;
   const email = offers.find((o) => o.email_address)?.email_address;
 
+  // Normalise payment_type: blank / null / unknown → treat as 'property' (summary imports)
+  function effectiveType(t) {
+    const s = String(t || '').toLowerCase().trim();
+    if (!s || s === 'null' || s === 'undefined') return 'property';
+    if (s.includes('infra')) return 'infrastructure';
+    if (s.includes('legal') || s.includes('tdp')) return 'legal_tdp';
+    if (s.includes('prop')) return 'property';
+    if (['property', 'infrastructure', 'legal_tdp', 'other'].includes(s)) return s;
+    return 'other';
+  }
+
   const paidByType = { property: 0, infrastructure: 0, legal_tdp: 0, other: 0 };
-  payments.forEach((p) => { paidByType[p.payment_type] = (paidByType[p.payment_type] || 0) + Number(p.amount || 0); });
+  payments.forEach((p) => {
+    const t = effectiveType(p.payment_type);
+    paidByType[t] = (paidByType[t] || 0) + Number(p.amount || 0);
+  });
   // fold the legacy "Amount Paid" field on the Offer itself into Property payments too
   const offerAmounts = offers.reduce((s, o) => s + Number(o.amount_paid || 0), 0);
   paidByType.property += offerAmounts;
@@ -58,6 +74,15 @@ export default function SubscriberProfile() {
       expected.legal_tdp += Number(cfg.expected_legal_tdp_fee || 0);
     }
   });
+
+  // If no property type is known yet but we have a single fee-config row for the estate,
+  // use that as a reasonable default so % paid can still be calculated.
+  if (propertyTypes.length === 0 && feeConfig.length === 1) {
+    const cfg = feeConfig[0];
+    expected.property = Number(cfg.expected_property_cost || 0);
+    expected.infrastructure = Number(cfg.expected_infrastructure_fee || 0);
+    expected.legal_tdp = Number(cfg.expected_legal_tdp_fee || 0);
+  }
 
   const propertyPct = expected.property > 0 ? Math.round((paidByType.property / expected.property) * 100) : null;
   const allRemarks = [
@@ -116,15 +141,21 @@ export default function SubscriberProfile() {
                 return (
                   <tr key={t}>
                     <td>{PAYMENT_TYPE_LABELS[t]}</td>
-                    <td className="right">{exp > 0 ? exp.toLocaleString() : 'Not configured'}</td>
-                    <td className="right">{paid.toLocaleString()}</td>
+                    <td className="right">{exp > 0 ? exp.toLocaleString() : <span className="muted">Not configured</span>}</td>
+                    <td className="right">{paid > 0 ? paid.toLocaleString() : '0'}</td>
                     <td className="right">{exp > 0 ? Math.max(exp - paid, 0).toLocaleString() : '—'}</td>
                     <td>{pct !== null ? `${pct}%` : '—'}</td>
                   </tr>
                 );
               })}
               {paidByType.other > 0 && (
-                <tr><td>Other</td><td className="right">—</td><td className="right">{paidByType.other.toLocaleString()}</td><td className="right">—</td><td>—</td></tr>
+                <tr>
+                  <td>Other</td>
+                  <td className="right">—</td>
+                  <td className="right">{paidByType.other.toLocaleString()}</td>
+                  <td className="right">—</td>
+                  <td>—</td>
+                </tr>
               )}
             </tbody>
           </table>
@@ -132,7 +163,15 @@ export default function SubscriberProfile() {
         {expected.property === 0 && expected.infrastructure === 0 && expected.legal_tdp === 0 && (
           <p className="muted" style={{ marginTop: 8 }}>
             No expected fee amounts are configured yet for {propertyTypes.join(', ') || 'this property type'} in {estate?.name}.
-            Set them under Estates → {estate?.name} → Property Types to see accurate percentages here.
+            Go to <b>Estates → {estate?.name} → Property Types</b> and enter the Expected Property Cost,
+            Infrastructure Fee and Legal/TDP Fee so percentages can be calculated.
+          </p>
+        )}
+        {paidByType.other > 0 && (
+          <p className="muted" style={{ marginTop: 8 }}>
+            Some payments are stored as type <b>Other</b>. If they are actually property payments
+            (common after an earlier import), edit them on the Payments tab and set Type = Property,
+            or re-import the Excel after this update (new imports default to Property).
           </p>
         )}
       </div>
@@ -141,18 +180,33 @@ export default function SubscriberProfile() {
         <h3>Payment History</h3>
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Date</th><th>Type</th><th>Amount</th><th>Reference</th><th>Remarks</th></tr></thead>
+            <thead>
+              <tr>
+                <th style={{ width: '15%' }}>Date</th>
+                <th style={{ width: '15%' }}>Type</th>
+                <th style={{ width: '20%', textAlign: 'right' }}>Amount (₦)</th>
+                <th style={{ width: '20%' }}>Reference</th>
+                <th>Remarks</th>
+              </tr>
+            </thead>
             <tbody>
-              {payments.map((p) => (
-                <tr key={p.id}>
-                  <td>{p.date_paid || '—'}</td>
-                  <td>{PAYMENT_TYPE_LABELS[p.payment_type] || p.payment_type}</td>
-                  <td className="right">{Number(p.amount || 0).toLocaleString()}</td>
-                  <td>{p.payment_reference}</td>
-                  <td>{p.remarks}</td>
-                </tr>
-              ))}
-              {payments.length === 0 && <tr><td colSpan={5} className="empty-state">No payment entries found for this name in this estate.</td></tr>}
+              {payments.map((p) => {
+                const t = effectiveType(p.payment_type);
+                return (
+                  <tr key={p.id}>
+                    <td>{p.date_paid || '—'}</td>
+                    <td>{PAYMENT_TYPE_LABELS[t] || t}</td>
+                    <td className="right" style={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                      {Number(p.amount || 0).toLocaleString()}
+                    </td>
+                    <td>{p.payment_reference || '—'}</td>
+                    <td>{p.remarks || '—'}</td>
+                  </tr>
+                );
+              })}
+              {payments.length === 0 && (
+                <tr><td colSpan={5} className="empty-state">No payment entries found for this name in this estate.</td></tr>
+              )}
             </tbody>
           </table>
         </div>

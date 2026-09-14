@@ -40,6 +40,8 @@ export const PAYMENT_FIELD_DEFS = [
 
 function normalizePaymentType(v) {
   const s = String(v || '').toLowerCase().trim();
+  // Empty / missing Payment Type column (common on summary Excel sheets) → treat as Property
+  if (!s) return 'property';
   if (s.includes('infra')) return 'infrastructure';
   if (s.includes('legal') || s.includes('tdp')) return 'legal_tdp';
   if (s.includes('prop')) return 'property';
@@ -282,7 +284,12 @@ export default function PaymentsTab() {
           profile={profile}
           onClose={() => setShowImport(false)}
           onImported={load}
-          transformRecord={(r) => ({ ...r, payment_type: normalizePaymentType(r.payment_type) || 'property' })}
+          transformRecord={(r) => ({
+            ...r,
+            // Always force a valid payment_type. Summary Excel files never have this column,
+            // so missing/blank must become 'property' (not 'other').
+            payment_type: normalizePaymentType(r.payment_type),
+          })}
         />
       )}
     </div>

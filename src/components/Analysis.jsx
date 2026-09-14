@@ -57,7 +57,12 @@ export default function Analysis() {
     });
     payments.forEach((p) => {
       const rec = ensure(p.subscriber_name, p.property_type);
-      if (rec && p.payment_type === 'property') rec.paid += Number(p.amount || 0);
+      if (!rec) return;
+      // Treat blank / null / 'other' as property payments (summary Excel imports
+      // historically landed here when the Payment Type column was missing).
+      const t = String(p.payment_type || '').toLowerCase().trim();
+      const isProperty = !t || t === 'property' || t === 'other' || t.includes('prop');
+      if (isProperty) rec.paid += Number(p.amount || 0);
     });
 
     const list = Array.from(map.values());
