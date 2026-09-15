@@ -19,7 +19,9 @@ function guessMapping(headers, fieldDefs) {
   return headers.map((h) => {
     const norm = normalize(h);
     // Always ignore pure serial / index columns and pure percentage columns
-    if (!norm || norm === 'serial' || norm === 's n' || norm === 'sn') return IGNORE;
+    if (!norm || norm === 'serial' || norm === 's n' || norm === 'sn' ||
+        norm === 'serial number' || norm === 'serial no' || norm === 's no' ||
+        norm === 'no' || norm === 'number') return IGNORE;
     if (norm === 'paid' || norm === '% paid' || norm === 'percent paid' ||
         norm === 'percentage paid' || norm === '%paid' || norm.endsWith(' % paid') ||
         norm === 'balance due' || norm === 'balance' || norm === 'file no' || norm === 'file number') {
@@ -59,8 +61,24 @@ function excelDateToISO(value) {
   if (value instanceof Date && !isNaN(value)) {
     return value.toISOString().slice(0, 10);
   }
+  // Excel serial number (days since 1899-12-30)
+  if (typeof value === 'number' && value > 20000 && value < 80000) {
+    const epoch = new Date(Date.UTC(1899, 11, 30));
+    const d = new Date(epoch.getTime() + value * 86400000);
+    if (!isNaN(d)) return d.toISOString().slice(0, 10);
+  }
   if (typeof value === 'string' && value.trim()) {
-    const d = new Date(value);
+    const s = value.trim();
+    // DD/MM/YYYY or DD-MM-YYYY (common in Nigerian spreadsheets)
+    const m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
+    if (m) {
+      let [, dd, mm, yyyy] = m;
+      if (yyyy.length === 2) yyyy = Number(yyyy) > 50 ? `19${yyyy}` : `20${yyyy}`;
+      const iso = `${yyyy.padStart(4, '0')}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`;
+      const d = new Date(iso);
+      if (!isNaN(d)) return iso;
+    }
+    const d = new Date(s);
     if (!isNaN(d)) return d.toISOString().slice(0, 10);
   }
   return null;
