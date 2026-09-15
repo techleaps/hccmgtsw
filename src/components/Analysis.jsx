@@ -1,8 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
-
-function norm(s) { return String(s || '').trim().toLowerCase(); }
+import { buildSubscribers, costByTypeMap, bucketSubscribers, breakdownByPropertyType } from '../lib/paymentAnalysis';
 
 export default function Analysis() {
   const { estateId } = useParams();
@@ -33,70 +32,27 @@ export default function Analysis() {
     setLoading(false);
   }
 
-  const subscribers = useMemo(() => {
-    const map = new Map(); // key: normalized name -> { name, propertyType, paid, hasAllocation }
-    function ensure(nameRaw, propertyType) {
-      const key = norm(nameRaw);
-      if (!key) return null;
-      if (!map.has(key)) {
-        map.set(key, { name: nameRaw.trim(), propertyType: propertyType || null, paid: 0, hasAllocation: false });
-      }
-      const rec = map.get(key);
-      if (!rec.propertyType && propertyType) rec.propertyType = propertyType;
-      return rec;
-    }
+  const allSubscribers = useMemo(
+    () => buildSubscribers(offers, allocations, payments),
+    [offers, allocations, payments]
+  );
 
-    offers.forEach((o) => {
-      const rec = ensure(o.subscriber_name, o.property_type);
-      if (rec) rec.paid += Number(o.amount_paid || 0);
-    });
-    allocations.forEach((a) => {
-      if (!a.subscriber_name) return; // vacant/unallocated units aren't a "subscriber"
-      const rec = ensure(a.subscriber_name, a.property_type);
-      if (rec) rec.hasAllocation = true;
-    });
-    payments.forEach((p) => {
-      const rec = ensure(p.subscriber_name, p.property_type);
-      if (!rec) return;
-      // Treat blank / null / 'other' as property payments (summary Excel imports
-      // historically landed here when the Payment Type column was missing).
-      const t = String(p.payment_type || '').toLowerCase().trim();
-      const isProperty = !t || t === 'property' || t === 'other' || t.includes('prop');
-      if (isProperty) rec.paid += Number(p.amount || 0);
-    });
+  const subscribers = useMemo(
+    () => (propertyTypeFilter ? allSubscribers.filter((s) => s.propertyType === propertyTypeFilter) : allSubscribers),
+    [allSubscribers, propertyTypeFilter]
+  );
 
-    const list = Array.from(map.values());
-    return propertyTypeFilter ? list.filter((s) => s.propertyType === propertyTypeFilter) : list;
-  }, [offers, allocations, payments, propertyTypeFilter]);
+  const costByType = useMemo(() => costByTypeMap(types), [types]);
 
-  const costByType = useMemo(() => {
-    const m = {};
-    types.forEach((t) => { m[t.property_type] = Number(t.expected_property_cost || 0); });
-    return m;
-  }, [types]);
+  const buckets = useMemo(() => bucketSubscribers(subscribers, costByType), [subscribers, costByType]);
 
-  const buckets = useMemo(() => {
-    const result = {
-      hundredPlus: { count: 0, total: 0, allocated: 0, unallocated: 0 },
-      sixtyTo99: { count: 0, total: 0, allocated: 0, unallocated: 0 },
-      belowSixty: { count: 0, total: 0, allocated: 0, unallocated: 0 },
-      unknown: { count: 0, total: 0 },
-    };
-    subscribers.forEach((s) => {
-      const expected = costByType[s.propertyType];
-      if (!expected || expected <= 0) {
-        result.unknown.count += 1;
-        result.unknown.total += s.paid;
-        return;
-      }
-      const pct = (s.paid / expected) * 100;
-      const bucket = pct >= 100 ? 'hundredPlus' : pct >= 60 ? 'sixtyTo99' : 'belowSixty';
-      result[bucket].count += 1;
-      result[bucket].total += s.paid;
-      if (s.hasAllocation) result[bucket].allocated += 1; else result[bucket].unallocated += 1;
-    });
-    return result;
-  }, [subscribers, costByType]);
+  // Always computed from the FULL, unfiltered subscriber list, so old-rate vs
+  // new-rate (or any other per-type split) shows up as its own line here even
+  // while the filter above is narrowed to one type.
+  const typeBreakdown = useMemo(
+    () => breakdownByPropertyType(allSubscribers, costByType),
+    [allSubscribers, costByType]
+  );
 
   if (loading) return <p className="muted">Loading…</p>;
 
@@ -164,6 +120,38 @@ export default function Analysis() {
             </tr>
           </tbody>
         </table>
+      </div>
+
+      <div className="card">
+        <h3>Breakdown by Property Type</h3>
+        <p className="muted" style={{ marginTop: -8 }}>
+          Each exact Property Type label (e.g. separate "Old Rate" / "New Rate" entries for the same house type)
+          gets its own line here, each measured against its own Expected Property Cost.
+        </p>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Property Type</th><th>Subscribers</th><th>Expected Cost (₦)</th>
+                <th>Total Collected (₦)</th><th>Total Expected (₦)</th><th>Fully Paid</th><th>Allocated</th>
+              </tr>
+            </thead>
+            <tbody>
+              {typeBreakdown.map((row) => (
+                <tr key={row.propertyType}>
+                  <td>{row.propertyType}</td>
+                  <td>{row.count}</td>
+                  <td className="right">{row.expectedCost > 0 ? row.expectedCost.toLocaleString() : <span className="muted">Not set</span>}</td>
+                  <td className="right">{row.totalPaid.toLocaleString()}</td>
+                  <td className="right">{row.totalExpected > 0 ? row.totalExpected.toLocaleString() : '—'}</td>
+                  <td>{row.expectedCost > 0 ? `${row.fullyPaidCount} / ${row.count}` : '—'}</td>
+                  <td>{row.allocatedCount} / {row.count}</td>
+                </tr>
+              ))}
+              {typeBreakdown.length === 0 && <tr><td colSpan={7} className="empty-state">No subscriber data found for this estate.</td></tr>}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div className="card">

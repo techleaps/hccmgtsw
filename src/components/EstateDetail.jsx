@@ -109,6 +109,12 @@ export default function EstateDetail() {
           and Analysis pages calculate accurate payment percentages — these fees vary by estate, so set them per
           estate here.
         </p>
+        <p className="muted">
+          <b>Price revised mid-way?</b> Add a separate row per rate, e.g. "3 Bedroom Terrace — Old Rate" and
+          "3 Bedroom Terrace — New Rate", each with its own Expected Property Cost. Then record every subscriber
+          under whichever one actually applies to them. That keeps someone who completed payment at the old
+          price showing as fully paid, instead of being measured against the new, higher cost.
+        </p>
         <div className="table-wrap">
           <table>
             <thead>
