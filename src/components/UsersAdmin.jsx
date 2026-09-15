@@ -5,6 +5,23 @@ import { useAuth } from '../lib/AuthContext';
 
 const BLANK = { username: '', password: '', full_name: '', role: 'user', supervisor_id: '' };
 
+// supabase-js's functions.invoke() only gives a generic "Edge Function returned a
+// non-2xx status code" in error.message — the real reason the function sent back
+// (e.g. "Username must be 3-32 characters…") is JSON in the response body, reachable
+// via error.context, a raw Response object. Fall back gracefully if that ever changes.
+async function extractFunctionError(error, data) {
+  if (data?.error) return data.error;
+  if (error?.context && typeof error.context.json === 'function') {
+    try {
+      const body = await error.context.clone().json();
+      if (body?.error) return body.error;
+    } catch {
+      // context wasn't JSON (e.g. a network-level failure) — fall through
+    }
+  }
+  return error?.message || 'Something went wrong creating this user.';
+}
+
 export default function UsersAdmin() {
   const { profile, isSuperAdmin, session } = useAuth();
   const [users, setUsers] = useState([]);
@@ -36,7 +53,7 @@ export default function UsersAdmin() {
       body: form,
     });
     setSaving(false);
-    if (error || data?.error) { setError(data?.error || error.message); return; }
+    if (error || data?.error) { setError(await extractFunctionError(error, data)); return; }
     setShowModal(false);
     setCreatedInfo({ username: form.username, password: form.password, full_name: form.full_name });
     setForm(BLANK);
