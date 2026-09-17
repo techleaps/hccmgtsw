@@ -17,17 +17,20 @@ export default function CooLogTab() {
     setEstates(estatesData || []);
     const { data } = await supabase
       .from('ownership_changes')
-      .select('*, offers(estate_id, estates(name)), allocation_records(estate_id, estates(name))')
+      .select('*, offers(estate_id, estates(name)), allocation_records(estate_id, estates(name)), estates(name)')
       .order('created_at', { ascending: false });
     setRows(data || []);
     setLoading(false);
   }
 
   function estateOf(r) {
-    return r.offers?.estates?.name || r.allocation_records?.estates?.name || '—';
+    return r.estates?.name
+      || r.offers?.estates?.name
+      || r.allocation_records?.estates?.name
+      || '—';
   }
   function estateIdOf(r) {
-    return r.offers?.estate_id || r.allocation_records?.estate_id || null;
+    return r.estate_id || r.offers?.estate_id || r.allocation_records?.estate_id || null;
   }
 
   const filtered = useMemo(() => {
@@ -37,6 +40,11 @@ export default function CooLogTab() {
       return hay.includes(search.toLowerCase());
     });
   }, [rows, estateFilter, search]);
+
+  const totalFees = useMemo(
+    () => filtered.reduce((s, r) => s + Number(r.amount_paid || 0), 0),
+    [filtered]
+  );
 
   return (
     <div>
@@ -48,12 +56,19 @@ export default function CooLogTab() {
         </div>
       </div>
       <p className="muted">
-        To record a new change of ownership, open the subscriber's row in the Offers or
-        Allocations register and click "Record COO".
+        To record a new change of ownership, open the subscriber&apos;s row in the Allocations (or Offers)
+        register and click <b>Record COO</b>. Capture the COO fee and optional payment evidence there.
       </p>
 
       <div className="grid cols-3">
-        <div className="stat-card"><div className="value">{filtered.length}</div><div className="label">Total Ownership Changes</div></div>
+        <div className="stat-card">
+          <div className="value">{filtered.length}</div>
+          <div className="label">Total Ownership Changes</div>
+        </div>
+        <div className="stat-card gold">
+          <div className="value">₦{totalFees.toLocaleString()}</div>
+          <div className="label">Total COO Fees Recorded</div>
+        </div>
       </div>
 
       <div className="card">
@@ -67,7 +82,11 @@ export default function CooLogTab() {
           </div>
           <div style={{ minWidth: 220, flex: 1 }}>
             <label>Search</label>
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search previous or new owner name…" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search previous or new owner name…"
+            />
           </div>
         </div>
       </div>
@@ -77,24 +96,42 @@ export default function CooLogTab() {
           <table>
             <thead>
               <tr>
-                <th>Date</th><th>Register</th><th>Estate</th><th>Previous Owner</th><th>New Owner</th>
-                <th>New PON / House No</th><th>Reason</th><th>Comments</th>
+                <th>Date</th>
+                <th>Estate</th>
+                <th>Previous Owner</th>
+                <th>New Owner</th>
+                <th>House / PON</th>
+                <th className="right">COO Fee (₦)</th>
+                <th>Reason</th>
+                <th>Comments</th>
               </tr>
             </thead>
             <tbody>
               {filtered.map((r) => (
                 <tr key={r.id}>
-                  <td>{r.date_changed}</td>
-                  <td>{r.offer_id ? 'Offer' : 'Allocation'}</td>
+                  <td>{r.date_changed || '—'}</td>
                   <td>{estateOf(r)}</td>
                   <td>{r.previous_owner}</td>
-                  <td>{r.new_owner}</td>
-                  <td>{r.new_pon || r.new_allocation_no}</td>
-                  <td>{r.reason}</td>
-                  <td>{r.comments}</td>
+                  <td>
+                    {estateIdOf(r) ? (
+                      <Link to={`/subscriber/${estateIdOf(r)}/${encodeURIComponent(r.new_owner)}`}>
+                        {r.new_owner}
+                      </Link>
+                    ) : r.new_owner}
+                  </td>
+                  <td>{r.new_pon || r.new_allocation_no || '—'}</td>
+                  <td className="right">{Number(r.amount_paid || 0).toLocaleString()}</td>
+                  <td>{r.reason || '—'}</td>
+                  <td>{r.comments || '—'}</td>
                 </tr>
               ))}
-              {filtered.length === 0 && <tr><td colSpan={8} className="empty-state">No ownership changes recorded yet.</td></tr>}
+              {filtered.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="empty-state">
+                    No ownership changes recorded yet. Use <b>Record COO</b> on an allocation row (e.g. Kuje estate).
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         )}

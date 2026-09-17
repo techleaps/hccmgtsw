@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
+import { fetchAllFrom } from '../lib/fetchAll';
 import { buildSubscribers, costByTypeMap, bucketSubscribers, breakdownByPropertyType } from '../lib/paymentAnalysis';
 
 export default function Analysis() {
@@ -17,18 +18,27 @@ export default function Analysis() {
 
   async function load() {
     setLoading(true);
-    const [estateRes, typesRes, offersRes, allocRes, paymentsRes] = await Promise.all([
+    const [estateRes, typesRes] = await Promise.all([
       supabase.from('estates').select('*').eq('id', estateId).single(),
       supabase.from('estate_property_types').select('*').eq('estate_id', estateId),
-      supabase.from('offers').select('subscriber_name, property_type, amount_paid').eq('estate_id', estateId).eq('is_deleted', false),
-      supabase.from('allocation_records').select('subscriber_name, property_type').eq('estate_id', estateId).eq('is_deleted', false),
-      supabase.from('payments').select('subscriber_name, property_type, payment_type, amount').eq('estate_id', estateId).eq('is_deleted', false),
     ]);
     setEstate(estateRes.data || null);
     setTypes(typesRes.data || []);
-    setOffers(offersRes.data || []);
-    setAllocations(allocRes.data || []);
-    setPayments(paymentsRes.data || []);
+
+    const [offersAll, allocAll, paymentsAll] = await Promise.all([
+      fetchAllFrom('offers', (q) =>
+        q.select('subscriber_name, property_type, amount_paid').eq('estate_id', estateId).eq('is_deleted', false)
+      ),
+      fetchAllFrom('allocation_records', (q) =>
+        q.select('subscriber_name, property_type').eq('estate_id', estateId).eq('is_deleted', false)
+      ),
+      fetchAllFrom('payments', (q) =>
+        q.select('subscriber_name, property_type, payment_type, amount').eq('estate_id', estateId).eq('is_deleted', false)
+      ),
+    ]);
+    setOffers(offersAll);
+    setAllocations(allocAll);
+    setPayments(paymentsAll);
     setLoading(false);
   }
 
@@ -44,14 +54,11 @@ export default function Analysis() {
 
   const costByType = useMemo(() => costByTypeMap(types), [types]);
 
-  const buckets = useMemo(() => bucketSubscribers(subscribers, costByType), [subscribers, costByType]);
+  const buckets = useMemo(() => bucketSubscribers(subscribers, costByType, types), [subscribers, costByType, types]);
 
-  // Always computed from the FULL, unfiltered subscriber list, so old-rate vs
-  // new-rate (or any other per-type split) shows up as its own line here even
-  // while the filter above is narrowed to one type.
   const typeBreakdown = useMemo(
-    () => breakdownByPropertyType(allSubscribers, costByType),
-    [allSubscribers, costByType]
+    () => breakdownByPropertyType(allSubscribers, costByType, types),
+    [allSubscribers, costByType, types]
   );
 
   if (loading) return <p className="muted">Loading…</p>;

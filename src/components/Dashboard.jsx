@@ -14,10 +14,77 @@ export default function Dashboard() {
   const [byEstate, setByEstate] = useState([]);
   const [byPropertyType, setByPropertyType] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [searchQ, setSearchQ] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [searching, setSearching] = useState(false);
 
   useEffect(() => {
     load();
   }, []);
+
+  useEffect(() => {
+    const q = searchQ.trim();
+    if (q.length < 2) {
+      setSearchResults([]);
+      return undefined;
+    }
+    const handle = setTimeout(() => runSearch(q), 300);
+    return () => clearTimeout(handle);
+  }, [searchQ]);
+
+  async function runSearch(q) {
+    setSearching(true);
+    const pattern = `%${q}%`;
+    const [payRes, offerRes, allocRes] = await Promise.all([
+      supabase
+        .from('payments')
+        .select('subscriber_name, estate_id, property_type, estates(name)')
+        .eq('is_deleted', false)
+        .ilike('subscriber_name', pattern)
+        .limit(20),
+      supabase
+        .from('offers')
+        .select('subscriber_name, estate_id, property_type, estates(name)')
+        .eq('is_deleted', false)
+        .ilike('subscriber_name', pattern)
+        .limit(20),
+      supabase
+        .from('allocation_records')
+        .select('subscriber_name, estate_id, property_type, house_no, estates(name)')
+        .eq('is_deleted', false)
+        .ilike('subscriber_name', pattern)
+        .limit(20),
+    ]);
+    const map = new Map();
+    function add(row, source) {
+      if (!row?.subscriber_name || !row.estate_id) return;
+      const key = `${row.estate_id}::${row.subscriber_name.trim().toLowerCase()}`;
+      if (!map.has(key)) {
+        map.set(key, {
+          name: row.subscriber_name.trim(),
+          estateId: row.estate_id,
+          estateName: row.estates?.name || '—',
+          propertyType: row.property_type || null,
+          houseNo: row.house_no || null,
+          sources: new Set([source]),
+        });
+      } else {
+        const rec = map.get(key);
+        rec.sources.add(source);
+        if (!rec.propertyType && row.property_type) rec.propertyType = row.property_type;
+        if (!rec.houseNo && row.house_no) rec.houseNo = row.house_no;
+      }
+    }
+    (payRes.data || []).forEach((r) => add(r, 'Payment'));
+    (offerRes.data || []).forEach((r) => add(r, 'Offer'));
+    (allocRes.data || []).forEach((r) => add(r, 'Allocation'));
+    setSearchResults(
+      [...map.values()]
+        .map((r) => ({ ...r, sources: [...r.sources] }))
+        .slice(0, 25)
+    );
+    setSearching(false);
+  }
 
   async function load() {
     setLoading(true);
@@ -69,6 +136,54 @@ export default function Dashboard() {
             Signed in as <b>{profile?.full_name}</b> · <span className="tag approved">{ROLE_LABELS[profile?.role] || profile?.role}</span>
           </p>
         </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 16, position: 'relative' }}>
+        <label>Search subscriber</label>
+        <input
+          value={searchQ}
+          onChange={(e) => setSearchQ(e.target.value)}
+          placeholder="Type a name (min 2 characters)…"
+          autoComplete="off"
+        />
+        {searching && <p className="muted" style={{ marginTop: 6 }}>Searching…</p>}
+        {!searching && searchQ.trim().length >= 2 && searchResults.length === 0 && (
+          <p className="muted" style={{ marginTop: 6 }}>No matches found.</p>
+        )}
+        {searchResults.length > 0 && (
+          <div className="table-wrap" style={{ marginTop: 10, maxHeight: 280, overflowY: 'auto' }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Estate</th>
+                  <th>Property Type</th>
+                  <th>Found in</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {searchResults.map((r) => (
+                  <tr key={`${r.estateId}-${r.name}`}>
+                    <td>{r.name}</td>
+                    <td>{r.estateName}</td>
+                    <td>{r.propertyType || '—'}{r.houseNo ? ` · ${r.houseNo}` : ''}</td>
+                    <td>{r.sources.join(', ')}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        onClick={() => navigate(`/subscriber/${r.estateId}/${encodeURIComponent(r.name)}`)}
+                      >
+                        Open profile
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       <div className="grid cols-4">

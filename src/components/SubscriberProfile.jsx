@@ -1,98 +1,148 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
+import { useAuth } from '../lib/AuthContext';
+import { allocatePaymentSummary } from '../lib/paymentAnalysis';
+import { uploadDocument, getDownloadUrl, deleteDocument } from '../lib/documents';
 
-const PAYMENT_TYPE_LABELS = { property: 'Property', infrastructure: 'Infrastructure', legal_tdp: 'Legal / TDP', other: 'Other' };
+const PAYMENT_TYPE_LABELS = {
+  property: 'Property',
+  infrastructure: 'Infrastructure',
+  legal_tdp: 'Legal / TDP',
+  other: 'Other',
+};
+
+const DOC_TYPES = [
+  'Payment evidence',
+  'Allocation letter',
+  'Offer letter',
+  'Application for COO',
+  'COO payment evidence',
+  'TDP / Legal receipt',
+  'Other',
+];
 
 export default function SubscriberProfile() {
   const { estateId, name } = useParams();
   const decodedName = decodeURIComponent(name);
+  const { profile } = useAuth();
   const [estate, setEstate] = useState(null);
   const [offers, setOffers] = useState([]);
   const [allocations, setAllocations] = useState([]);
   const [payments, setPayments] = useState([]);
   const [feeConfig, setFeeConfig] = useState([]);
+  const [docs, setDocs] = useState([]);
+  const [cooRows, setCooRows] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [docType, setDocType] = useState(DOC_TYPES[0]);
+  const [docFile, setDocFile] = useState(null);
+  const [docError, setDocError] = useState('');
 
   useEffect(() => { load(); }, [estateId, name]);
 
   async function load() {
     setLoading(true);
-    const [estateRes, offersRes, allocRes, paymentsRes, feesRes] = await Promise.all([
+    const [estateRes, offersRes, allocRes, paymentsRes, feesRes, docsRes, cooRes] = await Promise.all([
       supabase.from('estates').select('*').eq('id', estateId).single(),
       supabase.from('offers').select('*').eq('estate_id', estateId).eq('is_deleted', false).ilike('subscriber_name', decodedName),
       supabase.from('allocation_records').select('*').eq('estate_id', estateId).eq('is_deleted', false).ilike('subscriber_name', decodedName),
       supabase.from('payments').select('*').eq('estate_id', estateId).eq('is_deleted', false).ilike('subscriber_name', decodedName).order('date_paid', { ascending: true }),
       supabase.from('estate_property_types').select('*').eq('estate_id', estateId),
+      supabase
+        .from('documents')
+        .select('*')
+        .eq('is_deleted', false)
+        .eq('estate_id', estateId)
+        .ilike('subscriber_name', decodedName)
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('ownership_changes')
+        .select('*')
+        .or(`previous_owner.ilike.${decodedName},new_owner.ilike.${decodedName}`)
+        .order('date_changed', { ascending: false }),
     ]);
     setEstate(estateRes.data || null);
     setOffers(offersRes.data || []);
     setAllocations(allocRes.data || []);
     setPayments(paymentsRes.data || []);
     setFeeConfig(feesRes.data || []);
+    setDocs(docsRes.data || []);
+    // Filter COO to this estate when estate_id is present
+    const coo = (cooRes.data || []).filter(
+      (c) => !c.estate_id || c.estate_id === estateId
+    );
+    setCooRows(coo);
     setLoading(false);
+  }
+
+  async function handleUploadDoc(e) {
+    e.preventDefault();
+    setDocError('');
+    if (!docFile) { setDocError('Choose a file.'); return; }
+    setUploading(true);
+    const { error } = await uploadDocument({
+      file: docFile,
+      description: docType,
+      uploadedBy: profile.id,
+      linkedTable: 'subscriber',
+      estateId,
+      subscriberName: decodedName,
+    });
+    setUploading(false);
+    if (error) { setDocError(error.message); return; }
+    setDocFile(null);
+    load();
+  }
+
+  async function handleDownload(doc) {
+    const url = await getDownloadUrl(doc.storage_path);
+    if (url) window.open(url, '_blank');
+    else alert('Could not generate download link.');
+  }
+
+  async function handleDeleteDoc(doc) {
+    if (!confirm(`Delete "${doc.file_name}"?`)) return;
+    await deleteDocument(doc.id, doc.storage_path);
+    load();
   }
 
   if (loading) return <p className="muted">Loading…</p>;
 
-  // Collect property types from every source so the profile still works when only payments exist
   const propertyTypes = [...new Set([
     ...offers.map((o) => o.property_type).filter(Boolean),
     ...allocations.map((a) => a.property_type).filter(Boolean),
     ...payments.map((p) => p.property_type).filter(Boolean),
   ])];
-  const phone = offers.find((o) => o.phone_number)?.phone_number || allocations.find((a) => a.phone_number)?.phone_number;
+
+  const phone = offers.find((o) => o.phone_number)?.phone_number
+    || allocations.find((a) => a.phone_number)?.phone_number;
   const email = offers.find((o) => o.email_address)?.email_address;
 
-  // Normalise payment_type for SUMMARY totals.
-  // Blank / null / "other" → property, because bulk Excel imports had no Payment Type
-  // column and previously landed as "other". Explicit infrastructure / legal_tdp stay as-is.
-  function effectiveType(t) {
-    const s = String(t || '').toLowerCase().trim();
-    if (!s || s === 'null' || s === 'undefined' || s === 'other') return 'property';
-    if (s.includes('infra')) return 'infrastructure';
-    if (s.includes('legal') || s.includes('tdp')) return 'legal_tdp';
-    if (s.includes('prop')) return 'property';
-    if (['property', 'infrastructure', 'legal_tdp'].includes(s)) return s;
-    return 'property'; // unknown labels also count toward property
-  }
+  const { expected, paid } = allocatePaymentSummary(payments, offers, feeConfig, propertyTypes);
 
-  const paidByType = { property: 0, infrastructure: 0, legal_tdp: 0, other: 0 };
-  payments.forEach((p) => {
-    const t = effectiveType(p.payment_type);
-    paidByType[t] = (paidByType[t] || 0) + Number(p.amount || 0);
-  });
-  // fold the legacy "Amount Paid" field on the Offer itself into Property payments too
-  const offerAmounts = offers.reduce((s, o) => s + Number(o.amount_paid || 0), 0);
-  paidByType.property += offerAmounts;
+  const propertyPct = expected.property > 0
+    ? Math.round((paid.property / expected.property) * 100)
+    : null;
 
-  // expected fees: sum across every property type this subscriber holds here
-  const expected = { property: 0, infrastructure: 0, legal_tdp: 0 };
-  propertyTypes.forEach((pt) => {
-    const cfg = feeConfig.find((f) => f.property_type === pt);
-    if (cfg) {
-      expected.property += Number(cfg.expected_property_cost || 0);
-      expected.infrastructure += Number(cfg.expected_infrastructure_fee || 0);
-      expected.legal_tdp += Number(cfg.expected_legal_tdp_fee || 0);
-    }
-  });
-
-  // If no property type is known yet but we have a single fee-config row for the estate,
-  // use that as a reasonable default so % paid can still be calculated.
-  if (propertyTypes.length === 0 && feeConfig.length === 1) {
-    const cfg = feeConfig[0];
-    expected.property = Number(cfg.expected_property_cost || 0);
-    expected.infrastructure = Number(cfg.expected_infrastructure_fee || 0);
-    expected.legal_tdp = Number(cfg.expected_legal_tdp_fee || 0);
-  }
-
-  const propertyPct = expected.property > 0 ? Math.round((paidByType.property / expected.property) * 100) : null;
   const allRemarks = [
     ...offers.map((o) => o.comment).filter(Boolean),
     ...offers.map((o) => o.remarks).filter(Boolean),
     ...allocations.map((a) => a.remarks).filter(Boolean),
     ...payments.map((p) => p.remarks).filter(Boolean),
   ];
+
+  function formatBalance(exp, paidAmt) {
+    if (!(exp > 0)) return '—';
+    const bal = exp - paidAmt;
+    // Show signed balance: negative means overpaid
+    return bal.toLocaleString();
+  }
+
+  function formatPct(exp, paidAmt) {
+    if (!(exp > 0)) return '—';
+    return `${Math.round((paidAmt / exp) * 100)}%`;
+  }
 
   return (
     <div>
@@ -104,10 +154,30 @@ export default function SubscriberProfile() {
       </div>
 
       <div className="grid cols-4">
-        <div className="stat-card"><div className="value">{propertyTypes.join(', ') || '—'}</div><div className="label">Property Type(s)</div></div>
-        <div className="stat-card blue"><div className="value">{offers.length > 0 ? (offers[0].offer_collected ? 'Collected' : 'Not Collected') : 'No Offer'}</div><div className="label">Offer Status</div></div>
-        <div className="stat-card gold"><div className="value">{allocations.length > 0 ? (allocations[0].collected ? 'Collected' : 'Not Collected') : 'No Allocation'}</div><div className="label">Allocation Status</div></div>
-        <div className="stat-card grey"><div className="value">{propertyPct !== null ? `${propertyPct}%` : '—'}</div><div className="label">Property Cost Paid</div></div>
+        <div className="stat-card">
+          <div className="value" style={{ fontSize: propertyTypes.join(', ').length > 24 ? 16 : undefined }}>
+            {propertyTypes.join(', ') || '—'}
+          </div>
+          <div className="label">Property Type(s)</div>
+        </div>
+        <div className="stat-card blue">
+          <div className="value">
+            {offers.length > 0 ? (offers[0].offer_collected ? 'Collected' : 'Not Collected') : 'No Offer'}
+          </div>
+          <div className="label">Offer Status</div>
+        </div>
+        <div className="stat-card gold">
+          <div className="value">
+            {allocations.length > 0 ? (allocations[0].collected ? 'Collected' : 'Not Collected') : 'No Allocation'}
+          </div>
+          <div className="label">Allocation Status</div>
+        </div>
+        <div className="stat-card grey">
+          <div className="value">
+            {propertyPct !== null ? `${propertyPct}%` : (paid.property > 0 ? 'Cost not set' : '—')}
+          </div>
+          <div className="label">Property Cost Paid</div>
+        </div>
       </div>
 
       <div className="grid cols-2">
@@ -121,12 +191,22 @@ export default function SubscriberProfile() {
         <div className="card">
           <h3>Who Collected What</h3>
           {offers.map((o) => (
-            <p key={o.id}>Offer: {o.offer_collected ? `Collected by ${o.offer_collected_by || 'unrecorded'}${o.offer_collected_date ? ` on ${o.offer_collected_date}` : ''}` : 'Not yet collected'}</p>
+            <p key={o.id}>
+              Offer: {o.offer_collected
+                ? `Collected by ${o.offer_collected_by || 'unrecorded'}${o.offer_collected_date ? ` on ${o.offer_collected_date}` : ''}`
+                : 'Not yet collected'}
+            </p>
           ))}
           {allocations.map((a) => (
-            <p key={a.id}>Allocation ({a.house_no || 'no house no'}): {a.collected ? `Collected by ${a.collected_by || 'unrecorded'}${a.collected_date ? ` on ${a.collected_date}` : ''}` : 'Not yet collected'}</p>
+            <p key={a.id}>
+              Allocation ({a.house_no || 'no house no'}): {a.collected
+                ? `Collected by ${a.collected_by || 'unrecorded'}${a.collected_date ? ` on ${a.collected_date}` : ''}`
+                : 'Not yet collected'}
+            </p>
           ))}
-          {offers.length === 0 && allocations.length === 0 && <p className="muted">No offer or allocation record found for this name in this estate.</p>}
+          {offers.length === 0 && allocations.length === 0 && (
+            <p className="muted">No offer or allocation record found for this name in this estate.</p>
+          )}
         </div>
       </div>
 
@@ -134,35 +214,60 @@ export default function SubscriberProfile() {
         <h3>Payments Summary</h3>
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Fee Type</th><th>Expected</th><th>Paid</th><th>Balance</th><th>% Paid</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Fee Type</th>
+                <th className="right">Expected</th>
+                <th className="right">Paid</th>
+                <th className="right">Balance</th>
+                <th>% Paid</th>
+              </tr>
+            </thead>
             <tbody>
               {['property', 'infrastructure', 'legal_tdp'].map((t) => {
-                const exp = expected[t];
-                const paid = paidByType[t] || 0;
-                const pct = exp > 0 ? Math.round((paid / exp) * 100) : null;
-                const balance = exp > 0 ? exp - paid : null; // can be negative when overpaid
+                const exp = expected[t] || 0;
+                const paidAmt = paid[t] || 0;
                 return (
                   <tr key={t}>
                     <td>{PAYMENT_TYPE_LABELS[t]}</td>
-                    <td className="right">{exp > 0 ? exp.toLocaleString() : <span className="muted">Not configured</span>}</td>
-                    <td className="right">{paid > 0 ? paid.toLocaleString() : '0'}</td>
                     <td className="right">
-                      {balance === null ? '—' : balance.toLocaleString()}
+                      {exp > 0 ? exp.toLocaleString() : <span className="muted">Not configured</span>}
                     </td>
-                    <td>{pct !== null ? `${pct}%` : '—'}</td>
+                    <td className="right">{paidAmt.toLocaleString()}</td>
+                    <td className="right">{formatBalance(exp, paidAmt)}</td>
+                    <td>
+                      {formatPct(exp, paidAmt)}
+                      {exp > 0 && paidAmt > exp && (
+                        <span className="tag approved" style={{ marginLeft: 6 }}>Overpaid</span>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
+              {paid.other > 0 && (
+                <tr>
+                  <td>Other</td>
+                  <td className="right">—</td>
+                  <td className="right">{paid.other.toLocaleString()}</td>
+                  <td className="right">—</td>
+                  <td>—</td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
         {expected.property === 0 && expected.infrastructure === 0 && expected.legal_tdp === 0 && (
           <p className="muted" style={{ marginTop: 8 }}>
-            No expected fee amounts are configured yet for {propertyTypes.join(', ') || 'this property type'} in {estate?.name}.
-            Go to <b>Estates → {estate?.name} → Property Types</b> and enter the Expected Property Cost,
-            Infrastructure Fee and Legal/TDP Fee so percentages can be calculated.
+            No expected fee amounts match <b>{propertyTypes.join(', ') || 'this property type'}</b> in {estate?.name}.
+            Go to <b>Estates → {estate?.name} → Property Types</b> and enter the Expected Property Cost
+            (use the same label as above, e.g. &quot;3 Bedroom Terrace - Old Rate&quot;).
           </p>
         )}
+        <p className="muted" style={{ marginTop: 8 }}>
+          Legal/TDP is only counted when a payment is recorded with type <b>Legal / TDP</b> (receipt collected).
+          Extra amounts paid above the property cost show as a negative balance and % above 100 — they are not
+          auto-moved into TDP.
+        </p>
       </div>
 
       <div className="card">
@@ -180,11 +285,16 @@ export default function SubscriberProfile() {
             </thead>
             <tbody>
               {payments.map((p) => {
-                const t = effectiveType(p.payment_type);
+                const t = String(p.payment_type || 'property').toLowerCase();
+                let label = PAYMENT_TYPE_LABELS[t] || p.payment_type || 'Property';
+                if (t.includes('tdp') || t.includes('legal')) label = 'Legal / TDP';
+                else if (t.includes('infra')) label = 'Infrastructure';
+                else if (t === 'other') label = 'Other';
+                else label = 'Property';
                 return (
                   <tr key={p.id}>
                     <td>{p.date_paid || '—'}</td>
-                    <td>{PAYMENT_TYPE_LABELS[t] || t}</td>
+                    <td>{label}</td>
                     <td className="right" style={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
                       {Number(p.amount || 0).toLocaleString()}
                     </td>
@@ -201,6 +311,91 @@ export default function SubscriberProfile() {
         </div>
       </div>
 
+      {cooRows.length > 0 && (
+        <div className="card">
+          <h3>Change of Ownership History</h3>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Previous Owner</th>
+                  <th>New Owner</th>
+                  <th className="right">COO Fee (₦)</th>
+                  <th>Reason</th>
+                  <th>Remarks</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cooRows.map((c) => (
+                  <tr key={c.id}>
+                    <td>{c.date_changed || '—'}</td>
+                    <td>{c.previous_owner}</td>
+                    <td>{c.new_owner}</td>
+                    <td className="right">{Number(c.amount_paid || 0).toLocaleString()}</td>
+                    <td>{c.reason || '—'}</td>
+                    <td>{c.comments || c.remarks || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      <div className="card">
+        <h3>Subscriber Documents</h3>
+        <p className="muted">
+          Attach payment evidence, allocation letter, offer letter, COO application, receipts, etc.
+        </p>
+        <form onSubmit={handleUploadDoc} className="flex wrap" style={{ gap: 12, alignItems: 'flex-end', marginBottom: 16 }}>
+          <div className="field" style={{ minWidth: 180 }}>
+            <label>Document type</label>
+            <select value={docType} onChange={(e) => setDocType(e.target.value)}>
+              {DOC_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+          <div className="field" style={{ minWidth: 220 }}>
+            <label>File</label>
+            <input type="file" onChange={(e) => setDocFile(e.target.files?.[0] || null)} />
+          </div>
+          <button type="submit" className="btn btn-primary" disabled={uploading}>
+            {uploading ? 'Uploading…' : 'Upload'}
+          </button>
+        </form>
+        {docError && <div className="error-text">{docError}</div>}
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Type / Description</th>
+                <th>File</th>
+                <th>Uploaded</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {docs.map((d) => (
+                <tr key={d.id}>
+                  <td>{d.description || '—'}</td>
+                  <td>{d.file_name}</td>
+                  <td>{d.created_at ? new Date(d.created_at).toLocaleString() : '—'}</td>
+                  <td>
+                    <div className="flex">
+                      <button type="button" className="btn btn-outline btn-sm" onClick={() => handleDownload(d)}>Download</button>
+                      <button type="button" className="btn btn-danger btn-sm" onClick={() => handleDeleteDoc(d)}>Delete</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {docs.length === 0 && (
+                <tr><td colSpan={4} className="empty-state">No documents attached yet.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       {allRemarks.length > 0 && (
         <div className="card">
           <h3>All Comments &amp; Remarks on File</h3>
@@ -211,10 +406,8 @@ export default function SubscriberProfile() {
       )}
 
       <p className="muted">
-        This report is built by matching the subscriber's name (spelling must match exactly, aside from
-        upper/lower case) across the Offers, Allocations, and Payments records for <b>{estate?.name}</b> only.
-        If this subscriber has records under a slightly different spelling, or in another estate, those
-        won't appear here — search that estate separately, or correct the spelling on the source record.
+        This report matches the subscriber&apos;s name (case-insensitive) across Offers, Allocations, and Payments
+        for <b>{estate?.name}</b> only. Slightly different spellings will not match — correct the source record if needed.
       </p>
     </div>
   );

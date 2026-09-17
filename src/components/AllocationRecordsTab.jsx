@@ -47,8 +47,12 @@ export default function AllocationRecordsTab() {
   const [saving, setSaving] = useState(false);
 
   const [cooRow, setCooRow] = useState(null);
-  const [cooForm, setCooForm] = useState({ new_owner: '', reason: '', new_allocation_no: '', comments: '' });
+  const [cooForm, setCooForm] = useState({
+    new_owner: '', reason: '', new_allocation_no: '', comments: '',
+    amount_paid: '', date_changed: '',
+  });
   const [cooSaving, setCooSaving] = useState(false);
+  const [cooFile, setCooFile] = useState(null);
 
   useEffect(() => { load(); }, [estateId]);
 
@@ -137,7 +141,15 @@ export default function AllocationRecordsTab() {
 
   function openCoo(row) {
     setCooRow(row);
-    setCooForm({ new_owner: '', reason: '', new_allocation_no: row.house_no || '', comments: '' });
+    setCooForm({
+      new_owner: '',
+      reason: '',
+      new_allocation_no: row.house_no || '',
+      comments: '',
+      amount_paid: '',
+      date_changed: new Date().toISOString().slice(0, 10),
+    });
+    setCooFile(null);
     setError('');
   }
 
@@ -146,11 +158,39 @@ export default function AllocationRecordsTab() {
     setError('');
     if (!cooForm.new_owner.trim()) { setError('Enter the new owner name.'); return; }
     setCooSaving(true);
-    const { error: logError } = await supabase.from('ownership_changes').insert({
-      allocation_record_id: cooRow.id, previous_owner: cooRow.subscriber_name, new_owner: cooForm.new_owner.trim(),
-      reason: cooForm.reason, new_allocation_no: cooForm.new_allocation_no, comments: cooForm.comments, created_by: profile.id,
-    });
+    const { data: logRow, error: logError } = await supabase.from('ownership_changes').insert({
+      allocation_record_id: cooRow.id,
+      previous_owner: cooRow.subscriber_name,
+      new_owner: cooForm.new_owner.trim(),
+      reason: cooForm.reason,
+      new_allocation_no: cooForm.new_allocation_no,
+      comments: cooForm.comments,
+      estate_id: estateId,
+      property_type: cooRow.property_type || null,
+      amount_paid: Number(cooForm.amount_paid) || 0,
+      date_changed: cooForm.date_changed || new Date().toISOString().slice(0, 10),
+      created_by: profile.id,
+    }).select('id').single();
     if (logError) { setError(logError.message); setCooSaving(false); return; }
+
+    // Optional payment evidence upload linked to this COO
+    if (cooFile && logRow?.id) {
+      try {
+        const { uploadDocument } = await import('../lib/documents');
+        await uploadDocument({
+          file: cooFile,
+          description: 'COO payment evidence',
+          uploadedBy: profile.id,
+          linkedTable: 'ownership_changes',
+          linkedRecordId: logRow.id,
+          estateId,
+          subscriberName: cooForm.new_owner.trim(),
+        });
+      } catch (err) {
+        console.warn('COO evidence upload failed', err);
+      }
+    }
+
     const { error: updError, requiresApproval } = await submitOrApplyUpdate({
       profile, tableName: 'allocation_records', recordId: cooRow.id,
       changes: { subscriber_name: cooForm.new_owner.trim(), house_no: cooForm.new_allocation_no },
@@ -307,14 +347,50 @@ export default function AllocationRecordsTab() {
             <h3>Record Change of Ownership</h3>
             <p className="muted">Current name on allocation: <b>{cooRow.subscriber_name}</b></p>
             <form onSubmit={handleCooSubmit}>
-              <div className="field"><label>New Owner Name</label><input value={cooForm.new_owner} onChange={(e) => setCooForm({ ...cooForm, new_owner: e.target.value })} required /></div>
-              <div className="field"><label>Reason for Change</label><input value={cooForm.reason} onChange={(e) => setCooForm({ ...cooForm, reason: e.target.value })} /></div>
-              <div className="field"><label>New House No (if reissued)</label><input value={cooForm.new_allocation_no} onChange={(e) => setCooForm({ ...cooForm, new_allocation_no: e.target.value })} /></div>
-              <div className="field"><label>Comments</label><textarea rows={2} value={cooForm.comments} onChange={(e) => setCooForm({ ...cooForm, comments: e.target.value })} /></div>
+              <div className="field">
+                <label>New Owner Name</label>
+                <input value={cooForm.new_owner} onChange={(e) => setCooForm({ ...cooForm, new_owner: e.target.value })} required />
+              </div>
+              <div className="field">
+                <label>Reason for Change</label>
+                <input value={cooForm.reason} onChange={(e) => setCooForm({ ...cooForm, reason: e.target.value })} />
+              </div>
+              <div className="field">
+                <label>New House No (if reissued)</label>
+                <input value={cooForm.new_allocation_no} onChange={(e) => setCooForm({ ...cooForm, new_allocation_no: e.target.value })} />
+              </div>
+              <div className="field">
+                <label>COO Fee Paid (₦)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={cooForm.amount_paid}
+                  onChange={(e) => setCooForm({ ...cooForm, amount_paid: e.target.value })}
+                  placeholder="0 if not yet paid"
+                />
+              </div>
+              <div className="field">
+                <label>Date of Change</label>
+                <input
+                  type="date"
+                  value={cooForm.date_changed}
+                  onChange={(e) => setCooForm({ ...cooForm, date_changed: e.target.value })}
+                />
+              </div>
+              <div className="field">
+                <label>Payment evidence (optional)</label>
+                <input type="file" onChange={(e) => setCooFile(e.target.files?.[0] || null)} />
+              </div>
+              <div className="field">
+                <label>Comments</label>
+                <textarea rows={2} value={cooForm.comments} onChange={(e) => setCooForm({ ...cooForm, comments: e.target.value })} />
+              </div>
               {error && <div className="error-text">{error}</div>}
               <div className="modal-actions">
                 <button type="button" className="btn btn-outline" onClick={() => setCooRow(null)}>Cancel</button>
-                <button type="submit" className="btn btn-primary" disabled={cooSaving}>{cooSaving ? 'Saving…' : 'Record Change'}</button>
+                <button type="submit" className="btn btn-primary" disabled={cooSaving}>
+                  {cooSaving ? 'Saving…' : 'Record Change'}
+                </button>
               </div>
             </form>
           </div>

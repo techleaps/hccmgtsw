@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
+import { fetchAllFrom } from '../lib/fetchAll';
 import { buildSubscribers, costByTypeMap, bucketSubscribers } from '../lib/paymentAnalysis';
 
 export default function AnalysisEstatesTab() {
@@ -10,23 +11,40 @@ export default function AnalysisEstatesTab() {
   const [allocations, setAllocations] = useState([]);
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   useEffect(() => { load(); }, []);
 
   async function load() {
     setLoading(true);
-    const [estatesRes, typesRes, offersRes, allocRes, paymentsRes] = await Promise.all([
-      supabase.from('estates').select('*').eq('is_deleted', false).order('name'),
-      supabase.from('estate_property_types').select('*'),
-      supabase.from('offers').select('estate_id, subscriber_name, property_type, amount_paid').eq('is_deleted', false),
-      supabase.from('allocation_records').select('estate_id, subscriber_name, property_type').eq('is_deleted', false),
-      supabase.from('payments').select('estate_id, subscriber_name, property_type, payment_type, amount').eq('is_deleted', false),
-    ]);
-    setEstates(estatesRes.data || []);
-    setTypes(typesRes.data || []);
-    setOffers(offersRes.data || []);
-    setAllocations(allocRes.data || []);
-    setPayments(paymentsRes.data || []);
+    setError('');
+    try {
+      const [estatesRes, typesRes] = await Promise.all([
+        supabase.from('estates').select('*').eq('is_deleted', false).order('name'),
+        supabase.from('estate_property_types').select('*'),
+      ]);
+      setEstates(estatesRes.data || []);
+      setTypes(typesRes.data || []);
+
+      // Full datasets — page past the 1000-row default
+      const [offersAll, allocAll, paymentsAll] = await Promise.all([
+        fetchAllFrom('offers', (q) =>
+          q.select('estate_id, subscriber_name, property_type, amount_paid').eq('is_deleted', false)
+        ),
+        fetchAllFrom('allocation_records', (q) =>
+          q.select('estate_id, subscriber_name, property_type').eq('is_deleted', false)
+        ),
+        fetchAllFrom('payments', (q) =>
+          q.select('estate_id, subscriber_name, property_type, payment_type, amount').eq('is_deleted', false)
+        ),
+      ]);
+      setOffers(offersAll);
+      setAllocations(allocAll);
+      setPayments(paymentsAll);
+    } catch (err) {
+      console.error(err);
+      setError(err.message || 'Failed to load analysis data');
+    }
     setLoading(false);
   }
 
@@ -38,7 +56,7 @@ export default function AnalysisEstatesTab() {
       const ePayments = payments.filter((p) => p.estate_id === e.id);
       const subs = buildSubscribers(eOffers, eAlloc, ePayments);
       const costByType = costByTypeMap(eTypes);
-      const buckets = bucketSubscribers(subs, costByType);
+      const buckets = bucketSubscribers(subs, costByType, eTypes);
       const totalPaid = subs.reduce((s, r) => s + r.paid, 0);
       const readyForAllocation = buckets.hundredPlus.unallocated;
       return { estate: e, subscriberCount: subs.length, totalPaid, buckets, readyForAllocation };
@@ -56,48 +74,48 @@ export default function AnalysisEstatesTab() {
     }, { subscribers: 0, totalPaid: 0, hundredPlus: 0, readyForAllocation: 0, belowSixty: 0 });
   }, [perEstate]);
 
-  if (loading) return <p className="muted">Loading…</p>;
+  if (loading) return <p className="muted">Loading full payment data (this may take a moment)…</p>;
+  if (error) return <p className="error-text">{error}</p>;
 
   return (
     <div>
       <div className="page-title"><h2>Payment Analysis</h2></div>
       <p className="muted">
         Who has paid 100% and above, 60–99%, or below 60% of the expected property cost, cross-referenced
-        with whether they've been allocated yet — to help decide who to house, who to follow up with, and who
+        with whether they&apos;ve been allocated yet — to help decide who to house, who to follow up with, and who
         may need a refund. Open an estate below for the full subscriber-by-subscriber breakdown.
       </p>
 
       <div className="grid cols-4">
-        <div className="stat-card"><div className="value">{portfolio.subscribers}</div><div className="label">Subscribers Tracked</div></div>
+        <div className="stat-card"><div className="value">{portfolio.subscribers.toLocaleString()}</div><div className="label">Subscribers Tracked</div></div>
         <div className="stat-card blue"><div className="value">₦{portfolio.totalPaid.toLocaleString()}</div><div className="label">Total Collected</div></div>
-        <div className="stat-card gold"><div className="value">{portfolio.readyForAllocation}</div><div className="label">Fully Paid, Not Yet Allocated</div></div>
-        <div className="stat-card grey"><div className="value">{portfolio.belowSixty}</div><div className="label">Below 60% Paid</div></div>
+        <div className="stat-card gold"><div className="value">{portfolio.readyForAllocation.toLocaleString()}</div><div className="label">Fully Paid, Not Yet Allocated</div></div>
+        <div className="stat-card grey"><div className="value">{portfolio.belowSixty.toLocaleString()}</div><div className="label">Below 60% Paid</div></div>
       </div>
 
       <div className="grid cols-3">
         {perEstate.map(({ estate: e, subscriberCount, totalPaid, buckets, readyForAllocation }) => (
-          <Link to={`/analysis/${e.id}`} key={e.id} className="card" style={{ display: 'block', textDecoration: 'none', color: 'inherit' }}>
+          <Link
+            to={`/analysis/${e.id}`}
+            key={e.id}
+            className="card"
+            style={{ display: 'block', textDecoration: 'none', color: 'inherit' }}
+          >
             <h3>{e.name}</h3>
-            <p className="muted" style={{ marginTop: -8 }}>{(e.category || '').replace(/_/g, ' ')}</p>
-            {subscriberCount === 0 ? (
-              <p className="muted">No payment data recorded yet.</p>
-            ) : (
-              <>
-                <p><b>{subscriberCount}</b> subscriber{subscriberCount === 1 ? '' : 's'} · <b>₦{totalPaid.toLocaleString()}</b> collected</p>
-                <div className="flex wrap" style={{ gap: 6 }}>
-                  <span className="tag approved">{buckets.hundredPlus.count} at 100%+</span>
-                  <span className="tag PO">{buckets.sixtyTo99.count} at 60–99%</span>
-                  <span className="tag rejected">{buckets.belowSixty.count} below 60%</span>
-                  {buckets.unknown.count > 0 && <span className="tag">{buckets.unknown.count} unknown cost</span>}
-                </div>
-                {readyForAllocation > 0 && (
-                  <p style={{ marginTop: 8 }}><b>{readyForAllocation}</b> fully paid and awaiting allocation</p>
-                )}
-              </>
+            <p className="muted">{subscriberCount.toLocaleString()} subscribers · ₦{totalPaid.toLocaleString()} collected</p>
+            <div className="flex wrap" style={{ gap: 6 }}>
+              <span className="tag approved">100%+: {buckets.hundredPlus.count}</span>
+              <span className="tag PO">60–99%: {buckets.sixtyTo99.count}</span>
+              <span className="tag rejected">&lt;60%: {buckets.belowSixty.count}</span>
+            </div>
+            <p style={{ marginTop: 8 }}>
+              <b>{readyForAllocation}</b> fully paid, not yet allocated
+            </p>
+            {totalPaid === 0 && subscriberCount === 0 && (
+              <p className="muted" style={{ marginTop: 6 }}>No payment data recorded yet.</p>
             )}
           </Link>
         ))}
-        {estates.length === 0 && <div className="empty-state">No estates yet — create one under Estates first.</div>}
       </div>
     </div>
   );
