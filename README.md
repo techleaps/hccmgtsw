@@ -60,6 +60,25 @@ Built with **free-tier services**, the same pattern as your Document Tracker:
 
 ---
 
+## IF YOU ALREADY HAVE v4 LIVE — read this first
+
+**Do not run `sql/schema.sql` on your existing project — it is for brand-new projects only.**
+
+To upgrade your live site without losing any data:
+
+1. In your Supabase project, open **SQL Editor → New query**.
+2. Open `sql/upgrade_v4_to_v5.sql` from this project, copy its entire contents, paste it in,
+   and click **Run**. This adds a "property_type" column to the refunds register (safe to run
+   even if it's already there) — nothing existing is touched or deleted.
+3. Replace your deployed frontend code with this v5 folder, commit, and push — Vercel
+   redeploys automatically. No new npm packages this time.
+
+If you're not yet on v4, run `sql/upgrade_v1_to_v2.sql`, then `sql/upgrade_v2_to_v3.sql`, then
+`sql/upgrade_v3_to_v4.sql`, then `sql/upgrade_v4_to_v5.sql`, in that order — all four are safe
+to run in sequence.
+
+---
+
 ## IF YOU ALREADY HAVE v3 LIVE — read this first
 
 **Do not run `sql/schema.sql` on your existing project — it is for brand-new projects only.**
@@ -347,6 +366,7 @@ nafil-admin/
 ├── sql/upgrade_v1_to_v2.sql             ← run once on an existing live v1 project
 ├── sql/upgrade_v2_to_v3.sql             ← run once on an existing live v2 project
 ├── sql/upgrade_v3_to_v4.sql             ← run once on an existing live v3 project instead
+├── sql/upgrade_v4_to_v5.sql             ← run once on an existing live v4 project instead
 ├── supabase/functions/admin-create-user ← deploy once (or redeploy after upgrading) via Supabase CLI
 ├── src/
 │   ├── components/                      ← all screens (Dashboard, Estates, Offers, Allocations, etc.)

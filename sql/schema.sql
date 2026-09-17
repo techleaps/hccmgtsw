@@ -226,6 +226,7 @@ create table if not exists refunds (
   serial_no bigint generated always as identity,
   subscriber_name text not null,
   estate_id uuid references estates(id),
+  property_type text,
   reason text,
   refund_made_by text,
   account_to_be_paid text,

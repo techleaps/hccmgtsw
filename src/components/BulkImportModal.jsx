@@ -106,6 +106,10 @@ export default function BulkImportModal({ title, tableName, fieldDefs, estates =
   const [estateId, setEstateId] = useState(presetEstateId || '');
   const [defaultPropertyType, setDefaultPropertyType] = useState('');
   const [fileName, setFileName] = useState('');
+  const [workbook, setWorkbook] = useState(null);
+  const [sheetNames, setSheetNames] = useState([]);
+  const [sheetRowCounts, setSheetRowCounts] = useState({});
+  const [selectedSheet, setSelectedSheet] = useState('');
   const [headers, setHeaders] = useState([]);
   const [rowsRaw, setRowsRaw] = useState([]);      // for numbers/dates/checkboxes
   const [rowsDisplay, setRowsDisplay] = useState([]); // formatted text, for text fields (avoids "100%" -> 1 bugs)
@@ -117,6 +121,35 @@ export default function BulkImportModal({ title, tableName, fieldDefs, estates =
 
   const hasPropertyTypeField = fieldDefs.some((f) => f.key === 'property_type');
 
+  // Pulls the header row + data rows out of ONE sheet of an already-parsed workbook.
+  // Used both for single-sheet files (called immediately) and multi-sheet files
+  // (called once the person picks which sheet to use).
+  function parseSheet(wb, sheetName) {
+    setError('');
+    const sheet = wb.Sheets[sheetName];
+    const gridRaw = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: true });
+    const gridDisplay = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
+
+    const keepIdx = gridRaw
+      .map((r, i) => (r.some((c) => String(c ?? '').trim() !== '') ? i : -1))
+      .filter((i) => i !== -1);
+    if (keepIdx.length < 2) {
+      setError(`Could not find a header row and data rows in "${sheetName}".`);
+      return;
+    }
+    const [hdrIdx, ...dataIdx] = keepIdx;
+    const hdrRow = gridRaw[hdrIdx].map((h) => String(h ?? '').trim());
+    const dataRaw = dataIdx.map((i) => gridRaw[i]);
+    const dataDisplay = dataIdx.map((i) => gridDisplay[i]);
+
+    setHeaders(hdrRow);
+    setRowsRaw(dataRaw);
+    setRowsDisplay(dataDisplay);
+    const guessed = guessMapping(hdrRow, fieldDefs);
+    setMapping(guessed);
+    setStep('mapping');
+  }
+
   function handleFile(e) {
     setError('');
     const file = e.target.files?.[0];
@@ -126,28 +159,28 @@ export default function BulkImportModal({ title, tableName, fieldDefs, estates =
     reader.onload = (evt) => {
       try {
         const wb = XLSX.read(evt.target.result, { type: 'array', cellDates: true });
-        const sheet = wb.Sheets[wb.SheetNames[0]];
-        const gridRaw = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: true });
-        const gridDisplay = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
-
-        const keepIdx = gridRaw
-          .map((r, i) => (r.some((c) => String(c ?? '').trim() !== '') ? i : -1))
-          .filter((i) => i !== -1);
-        if (keepIdx.length < 2) {
-          setError('Could not find a header row and data rows in this file.');
+        if (!wb.SheetNames.length) {
+          setError('This file has no sheets to read.');
           return;
         }
-        const [hdrIdx, ...dataIdx] = keepIdx;
-        const hdrRow = gridRaw[hdrIdx].map((h) => String(h ?? '').trim());
-        const dataRaw = dataIdx.map((i) => gridRaw[i]);
-        const dataDisplay = dataIdx.map((i) => gridDisplay[i]);
-
-        setHeaders(hdrRow);
-        setRowsRaw(dataRaw);
-        setRowsDisplay(dataDisplay);
-        const guessed = guessMapping(hdrRow, fieldDefs);
-        setMapping(guessed);
-        setStep('mapping');
+        setWorkbook(wb);
+        setSheetNames(wb.SheetNames);
+        if (wb.SheetNames.length === 1) {
+          parseSheet(wb, wb.SheetNames[0]);
+        } else {
+          // Multiple sheets (e.g. "Combined", "Old Rate", "New Rate") — show a row
+          // count per sheet and let the person pick which one to import, rather
+          // than silently assuming the first one.
+          const counts = {};
+          wb.SheetNames.forEach((name) => {
+            const grid = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: '', raw: true });
+            const nonBlank = grid.filter((r) => r.some((c) => String(c ?? '').trim() !== ''));
+            counts[name] = Math.max(0, nonBlank.length - 1); // minus the header row
+          });
+          setSheetRowCounts(counts);
+          setSelectedSheet(wb.SheetNames[0]);
+          setStep('sheet');
+        }
       } catch (err) {
         setError('Could not read that file. Make sure it is a valid .xlsx, .xls, or .csv file.');
       }
@@ -293,11 +326,53 @@ export default function BulkImportModal({ title, tableName, fieldDefs, estates =
                   onChange={(e) => setDefaultPropertyType(e.target.value)}
                   placeholder="e.g. 2BR — used for every row if the file has no Property Type column"
                 />
+                <p className="muted">
+                  If this file only covers one rate/type (e.g. an "Old Rate" or "New Rate" sheet), set that
+                  here rather than adding a Property Type column — it will be stamped on every row.
+                </p>
               </div>
             )}
             {error && <div className="error-text">{error}</div>}
             <div className="modal-actions">
               {!presetEstateId && <button type="button" className="btn btn-outline" onClick={() => setStep('estate')}>Back</button>}
+            </div>
+          </div>
+        )}
+
+        {step === 'sheet' && (
+          <div>
+            <p className="muted">
+              <b>{fileName}</b> has {sheetNames.length} sheets. Choose which one to import — you can come back
+              and run this again for another sheet in the same file (for example, one sheet per price rate).
+            </p>
+            <div className="field">
+              <label>Sheet to Import</label>
+              <select value={selectedSheet} onChange={(e) => setSelectedSheet(e.target.value)}>
+                {sheetNames.map((name) => (
+                  <option key={name} value={name}>
+                    {name} ({sheetRowCounts[name] ?? 0} row{sheetRowCounts[name] === 1 ? '' : 's'})
+                  </option>
+                ))}
+              </select>
+            </div>
+            {hasPropertyTypeField && (
+              <div className="field">
+                <label>Default Property Type (optional)</label>
+                <input
+                  value={defaultPropertyType}
+                  onChange={(e) => setDefaultPropertyType(e.target.value)}
+                  placeholder="e.g. 3 Bedroom Terrace — Old Rate — used for every row in this sheet"
+                />
+                <p className="muted">
+                  If this sheet covers only one rate/type (e.g. "Old Rate" subscribers only), set that here so
+                  every row from this sheet is tagged with it.
+                </p>
+              </div>
+            )}
+            {error && <div className="error-text">{error}</div>}
+            <div className="modal-actions">
+              <button type="button" className="btn btn-outline" onClick={() => setStep('upload')}>Back</button>
+              <button type="button" className="btn btn-primary" onClick={() => parseSheet(workbook, selectedSheet)}>Continue</button>
             </div>
           </div>
         )}
@@ -334,7 +409,7 @@ export default function BulkImportModal({ title, tableName, fieldDefs, estates =
               </div>
             )}
             <div className="modal-actions">
-              <button type="button" className="btn btn-outline" onClick={() => setStep('upload')}>Back</button>
+              <button type="button" className="btn btn-outline" onClick={() => setStep(sheetNames.length > 1 ? 'sheet' : 'upload')}>Back</button>
               <button type="button" className="btn btn-primary" disabled={!mappingHasRequired} onClick={goToPreview}>
                 Preview Import
               </button>
