@@ -187,9 +187,6 @@ export default function Dashboard() {
       <div className="page-title">
         <div>
           <h2>Dashboard Overview</h2>
-          <p className="muted" style={{ margin: '2px 0 0' }}>
-            Signed in as <b>{profile?.full_name}</b> · <span className="tag approved">{ROLE_LABELS[profile?.role] || profile?.role}</span>
-          </p>
         </div>
       </div>
 

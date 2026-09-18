@@ -22,6 +22,46 @@ const DOC_TYPES = [
   'Other',
 ];
 
+
+/** Strip ranks/titles and collapse whitespace for fuzzy name compare */
+function normalizePersonName(s) {
+  let t = String(s || '').toLowerCase();
+  t = t.replace(/[^a-z0-9\s]/g, ' ');
+  const titles = [
+    'sqn', 'ldr', 'lt', 'col', 'maj', 'gen', 'avm', 'air', 'cdre', 'cdr', 'wg', 'gp', 'capt',
+    'flt', 'mr', 'mrs', 'ms', 'miss', 'dr', 'prof', 'hon', 'engr', 'arc', 'barr', 'alhaji',
+    'alh', 'hajiya', 'chief', 'sir', 'lady', 'mwo', 'wo', 'sgt', 'cpl', 'fs', 'acm',
+    'cas', 'rtd', 'retired',
+  ];
+  const parts = t.split(/\s+/).filter(Boolean).filter((w) => !titles.includes(w));
+  return parts.join(' ').trim();
+}
+
+function namesMatch(a, b) {
+  const na = normalizePersonName(a);
+  const nb = normalizePersonName(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  if (na.includes(nb) || nb.includes(na)) return true;
+  const ta = new Set(na.split(' ').filter((w) => w.length > 1));
+  const tb = nb.split(' ').filter((w) => w.length > 1);
+  const shared = tb.filter((w) => ta.has(w));
+  const need = Math.min(2, Math.min(ta.size, tb.length));
+  return shared.length >= need && shared.length > 0;
+}
+
+function dedupeByKey(rows, keyFn) {
+  const seen = new Set();
+  const out = [];
+  for (const r of rows || []) {
+    const k = keyFn(r);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(r);
+  }
+  return out;
+}
+
 export default function SubscriberProfile() {
   const { estateId, name } = useParams();
   const decodedName = decodeURIComponent(name);
@@ -44,46 +84,86 @@ export default function SubscriberProfile() {
 
   async function load() {
     setLoading(true);
-    // Escape commas in name for PostgREST .or() filter
-    const safeName = decodedName.replace(/,/g, ' ');
+    const safeName = decodedName.replace(/,/g, ' ').trim();
+    // Use contains-match so slight spacing/title differences still hit the DB
+    const pattern = `%${safeName}%`;
+    // Also try the longest word in the name (helps when titles differ)
+    const tokens = normalizePersonName(safeName).split(' ').filter((w) => w.length >= 3);
+    const tokenPattern = tokens.length ? `%${tokens[tokens.length - 1]}%` : pattern;
+
     const [estateRes, offersRes, allocRes, paymentsRes, feesRes, docsRes, cooRes, refundRes] = await Promise.all([
       supabase.from('estates').select('*').eq('id', estateId).single(),
-      supabase.from('offers').select('*').eq('estate_id', estateId).eq('is_deleted', false).ilike('subscriber_name', decodedName),
-      supabase.from('allocation_records').select('*').eq('estate_id', estateId).eq('is_deleted', false).ilike('subscriber_name', decodedName),
-      supabase.from('payments').select('*').eq('estate_id', estateId).eq('is_deleted', false).ilike('subscriber_name', decodedName).order('date_paid', { ascending: true }),
+      supabase.from('offers').select('*').eq('estate_id', estateId).eq('is_deleted', false).ilike('subscriber_name', pattern),
+      supabase.from('allocation_records').select('*').eq('estate_id', estateId).eq('is_deleted', false).ilike('subscriber_name', pattern),
+      supabase.from('payments').select('*').eq('estate_id', estateId).eq('is_deleted', false).ilike('subscriber_name', pattern).order('date_paid', { ascending: true }),
       supabase.from('estate_property_types').select('*').eq('estate_id', estateId),
       supabase
         .from('documents')
         .select('*')
         .eq('is_deleted', false)
         .eq('estate_id', estateId)
-        .ilike('subscriber_name', decodedName)
+        .ilike('subscriber_name', pattern)
         .order('created_at', { ascending: false }),
       supabase
         .from('ownership_changes')
         .select('*')
-        .or(`previous_owner.ilike.%${safeName}%,new_owner.ilike.%${safeName}%`)
+        .or(`previous_owner.ilike.${pattern},new_owner.ilike.${pattern}`)
         .order('date_changed', { ascending: false }),
       supabase
         .from('refunds')
         .select('*')
         .eq('is_deleted', false)
-        .ilike('subscriber_name', decodedName)
+        .ilike('subscriber_name', pattern)
         .order('date_of_approval', { ascending: false }),
     ]);
+
+    // If payments still empty, broaden search by last name token within this estate
+    let paymentRows = paymentsRes.data || [];
+    if (paymentRows.length === 0 && tokenPattern !== pattern) {
+      const { data: morePay } = await supabase
+        .from('payments')
+        .select('*')
+        .eq('estate_id', estateId)
+        .eq('is_deleted', false)
+        .ilike('subscriber_name', tokenPattern)
+        .order('date_paid', { ascending: true });
+      paymentRows = morePay || [];
+    }
+
+    // Client-side fuzzy filter so we only keep rows that really belong to this person
+    const filterName = (rows, field = 'subscriber_name') =>
+      (rows || []).filter((r) => namesMatch(r[field], decodedName));
+
+    let offers = filterName(offersRes.data);
+    let allocs = filterName(allocRes.data);
+    let pays = filterName(paymentRows);
+    // If fuzzy filter removed everything but DB returned rows, keep DB rows (exact-ish contains)
+    if (offers.length === 0 && (offersRes.data || []).length) offers = offersRes.data;
+    if (allocs.length === 0 && (allocRes.data || []).length) allocs = allocRes.data;
+    if (pays.length === 0 && paymentRows.length) pays = paymentRows;
+
+    // Deduplicate identical allocation/offer lines (same house + name)
+    offers = dedupeByKey(offers, (r) => `${(r.subscriber_name || '').toLowerCase()}|${r.form_no || ''}|${r.property_type || ''}`);
+    allocs = dedupeByKey(allocs, (r) => `${(r.subscriber_name || '').toLowerCase()}|${r.house_no || ''}|${r.property_type || ''}`);
+
     setEstate(estateRes.data || null);
-    setOffers(offersRes.data || []);
-    setAllocations(allocRes.data || []);
-    setPayments(paymentsRes.data || []);
+    setOffers(offers);
+    setAllocations(allocs);
+    setPayments(pays);
     setFeeConfig(feesRes.data || []);
-    setDocs(docsRes.data || []);
-    const coo = (cooRes.data || []).filter(
-      (c) => !c.estate_id || c.estate_id === estateId
-    );
+    setDocs(filterName(docsRes.data).length ? filterName(docsRes.data) : (docsRes.data || []));
+    const coo = (cooRes.data || []).filter((c) => {
+      if (c.estate_id && c.estate_id !== estateId) return false;
+      return namesMatch(c.previous_owner, decodedName) || namesMatch(c.new_owner, decodedName)
+        || String(c.previous_owner || '').toLowerCase().includes(safeName.toLowerCase())
+        || String(c.new_owner || '').toLowerCase().includes(safeName.toLowerCase());
+    });
     setCooRows(coo);
-    const ref = (refundRes.data || []).filter(
-      (r) => !r.estate_id || r.estate_id === estateId
-    );
+    const ref = (refundRes.data || []).filter((r) => {
+      if (r.estate_id && r.estate_id !== estateId) return false;
+      return namesMatch(r.subscriber_name, decodedName)
+        || String(r.subscriber_name || '').toLowerCase().includes(safeName.toLowerCase());
+    });
     setRefunds(ref);
     setLoading(false);
   }
