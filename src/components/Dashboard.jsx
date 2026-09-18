@@ -35,53 +35,108 @@ export default function Dashboard() {
   async function runSearch(q) {
     setSearching(true);
     const pattern = `%${q}%`;
-    const [payRes, offerRes, allocRes] = await Promise.all([
+    // Search across the whole operational DB, not only allocations
+    const [payRes, offerRes, allocRes, refundRes, cooPrevRes, cooNewRes, docRes] = await Promise.all([
       supabase
         .from('payments')
         .select('subscriber_name, estate_id, property_type, estates(name)')
         .eq('is_deleted', false)
         .ilike('subscriber_name', pattern)
-        .limit(20),
+        .limit(30),
       supabase
         .from('offers')
         .select('subscriber_name, estate_id, property_type, estates(name)')
         .eq('is_deleted', false)
         .ilike('subscriber_name', pattern)
-        .limit(20),
+        .limit(30),
       supabase
         .from('allocation_records')
         .select('subscriber_name, estate_id, property_type, house_no, estates(name)')
         .eq('is_deleted', false)
         .ilike('subscriber_name', pattern)
-        .limit(20),
+        .limit(30),
+      supabase
+        .from('refunds')
+        .select('subscriber_name, estate_id, property_type, amount_approved, estates(name)')
+        .eq('is_deleted', false)
+        .ilike('subscriber_name', pattern)
+        .limit(30),
+      supabase
+        .from('ownership_changes')
+        .select('previous_owner, new_owner, estate_id, property_type, amount_paid, estates(name), allocation_records(estate_id, estates(name)), offers(estate_id, estates(name))')
+        .ilike('previous_owner', pattern)
+        .limit(30),
+      supabase
+        .from('ownership_changes')
+        .select('previous_owner, new_owner, estate_id, property_type, amount_paid, estates(name), allocation_records(estate_id, estates(name)), offers(estate_id, estates(name))')
+        .ilike('new_owner', pattern)
+        .limit(30),
+      supabase
+        .from('documents')
+        .select('subscriber_name, estate_id, description, estates(name)')
+        .eq('is_deleted', false)
+        .ilike('subscriber_name', pattern)
+        .limit(30),
     ]);
+
     const map = new Map();
-    function add(row, source) {
-      if (!row?.subscriber_name || !row.estate_id) return;
-      const key = `${row.estate_id}::${row.subscriber_name.trim().toLowerCase()}`;
+    function resolveEstate(row) {
+      const estateId = row.estate_id
+        || row.allocation_records?.estate_id
+        || row.offers?.estate_id
+        || null;
+      const estateName = row.estates?.name
+        || row.allocation_records?.estates?.name
+        || row.offers?.estates?.name
+        || '—';
+      return { estateId, estateName };
+    }
+    function add(name, row, source, extra = {}) {
+      const cleaned = String(name || '').trim();
+      if (!cleaned) return;
+      const { estateId, estateName } = resolveEstate(row);
+      // Allow results without estate (still show in list; profile needs estate when possible)
+      const key = `${estateId || 'none'}::${cleaned.toLowerCase()}`;
       if (!map.has(key)) {
         map.set(key, {
-          name: row.subscriber_name.trim(),
-          estateId: row.estate_id,
-          estateName: row.estates?.name || '—',
-          propertyType: row.property_type || null,
-          houseNo: row.house_no || null,
+          name: cleaned,
+          estateId,
+          estateName,
+          propertyType: row.property_type || extra.propertyType || null,
+          houseNo: row.house_no || extra.houseNo || null,
           sources: new Set([source]),
         });
       } else {
         const rec = map.get(key);
         rec.sources.add(source);
-        if (!rec.propertyType && row.property_type) rec.propertyType = row.property_type;
-        if (!rec.houseNo && row.house_no) rec.houseNo = row.house_no;
+        if (!rec.propertyType && (row.property_type || extra.propertyType)) {
+          rec.propertyType = row.property_type || extra.propertyType;
+        }
+        if (!rec.houseNo && (row.house_no || extra.houseNo)) {
+          rec.houseNo = row.house_no || extra.houseNo;
+        }
+        if (!rec.estateId && estateId) {
+          rec.estateId = estateId;
+          rec.estateName = estateName;
+        }
       }
     }
-    (payRes.data || []).forEach((r) => add(r, 'Payment'));
-    (offerRes.data || []).forEach((r) => add(r, 'Offer'));
-    (allocRes.data || []).forEach((r) => add(r, 'Allocation'));
+
+    (payRes.data || []).forEach((r) => add(r.subscriber_name, r, 'Payment'));
+    (offerRes.data || []).forEach((r) => add(r.subscriber_name, r, 'Offer'));
+    (allocRes.data || []).forEach((r) => add(r.subscriber_name, r, 'Allocation'));
+    (refundRes.data || []).forEach((r) => add(r.subscriber_name, r, 'Refund'));
+    (docRes.data || []).forEach((r) => add(r.subscriber_name, r, 'Document'));
+    [...(cooPrevRes.data || []), ...(cooNewRes.data || [])].forEach((r) => {
+      add(r.previous_owner, r, 'COO (previous)');
+      add(r.new_owner, r, 'COO (new)');
+    });
+
     setSearchResults(
       [...map.values()]
-        .map((r) => ({ ...r, sources: [...r.sources] }))
-        .slice(0, 25)
+        .map((r) => ({ ...r, sources: [...r.sources].sort() }))
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .slice(0, 40)
     );
     setSearching(false);
   }
@@ -139,11 +194,11 @@ export default function Dashboard() {
       </div>
 
       <div className="card" style={{ marginBottom: 16, position: 'relative' }}>
-        <label>Search subscriber</label>
+        <label>Search across database</label>
         <input
           value={searchQ}
           onChange={(e) => setSearchQ(e.target.value)}
-          placeholder="Type a name (min 2 characters)…"
+          placeholder="Name — searches payments, offers, allocations, refunds, COO, documents…"
           autoComplete="off"
         />
         {searching && <p className="muted" style={{ marginTop: 6 }}>Searching…</p>}
@@ -151,7 +206,7 @@ export default function Dashboard() {
           <p className="muted" style={{ marginTop: 6 }}>No matches found.</p>
         )}
         {searchResults.length > 0 && (
-          <div className="table-wrap" style={{ marginTop: 10, maxHeight: 280, overflowY: 'auto' }}>
+          <div className="table-wrap" style={{ marginTop: 10, maxHeight: 320, overflowY: 'auto' }}>
             <table>
               <thead>
                 <tr>
@@ -163,23 +218,42 @@ export default function Dashboard() {
                 </tr>
               </thead>
               <tbody>
-                {searchResults.map((r) => (
-                  <tr key={`${r.estateId}-${r.name}`}>
-                    <td>{r.name}</td>
-                    <td>{r.estateName}</td>
-                    <td>{r.propertyType || '—'}{r.houseNo ? ` · ${r.houseNo}` : ''}</td>
-                    <td>{r.sources.join(', ')}</td>
-                    <td>
-                      <button
-                        type="button"
-                        className="btn btn-primary btn-sm"
-                        onClick={() => navigate(`/subscriber/${r.estateId}/${encodeURIComponent(r.name)}`)}
-                      >
-                        Open profile
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {searchResults.map((r) => {
+                  const canOpen = !!r.estateId;
+                  const go = () => {
+                    if (!canOpen) {
+                      alert('This match has no estate linked, so a profile page cannot be opened yet. Link the record to an estate first.');
+                      return;
+                    }
+                    navigate(`/subscriber/${r.estateId}/${encodeURIComponent(r.name)}`);
+                  };
+                  return (
+                    <tr
+                      key={`${r.estateId || 'x'}-${r.name}-${r.sources.join(',')}`}
+                      onClick={go}
+                      style={{ cursor: canOpen ? 'pointer' : 'default' }}
+                      title={canOpen ? 'Click to open profile' : 'No estate linked'}
+                    >
+                      <td>
+                        {canOpen ? (
+                          <span style={{ color: '#1f8fd6', fontWeight: 600 }}>{r.name}</span>
+                        ) : r.name}
+                      </td>
+                      <td>{r.estateName}</td>
+                      <td>{r.propertyType || '—'}{r.houseNo ? ` · ${r.houseNo}` : ''}</td>
+                      <td>{r.sources.join(', ')}</td>
+                      <td onClick={(e) => e.stopPropagation()}>
+                        {canOpen ? (
+                          <button type="button" className="btn btn-primary btn-sm" onClick={go}>
+                            Open profile
+                          </button>
+                        ) : (
+                          <span className="muted">No estate</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

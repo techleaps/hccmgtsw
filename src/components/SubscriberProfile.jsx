@@ -33,6 +33,7 @@ export default function SubscriberProfile() {
   const [feeConfig, setFeeConfig] = useState([]);
   const [docs, setDocs] = useState([]);
   const [cooRows, setCooRows] = useState([]);
+  const [refunds, setRefunds] = useState([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [docType, setDocType] = useState(DOC_TYPES[0]);
@@ -43,7 +44,9 @@ export default function SubscriberProfile() {
 
   async function load() {
     setLoading(true);
-    const [estateRes, offersRes, allocRes, paymentsRes, feesRes, docsRes, cooRes] = await Promise.all([
+    // Escape commas in name for PostgREST .or() filter
+    const safeName = decodedName.replace(/,/g, ' ');
+    const [estateRes, offersRes, allocRes, paymentsRes, feesRes, docsRes, cooRes, refundRes] = await Promise.all([
       supabase.from('estates').select('*').eq('id', estateId).single(),
       supabase.from('offers').select('*').eq('estate_id', estateId).eq('is_deleted', false).ilike('subscriber_name', decodedName),
       supabase.from('allocation_records').select('*').eq('estate_id', estateId).eq('is_deleted', false).ilike('subscriber_name', decodedName),
@@ -59,8 +62,14 @@ export default function SubscriberProfile() {
       supabase
         .from('ownership_changes')
         .select('*')
-        .or(`previous_owner.ilike.${decodedName},new_owner.ilike.${decodedName}`)
+        .or(`previous_owner.ilike.%${safeName}%,new_owner.ilike.%${safeName}%`)
         .order('date_changed', { ascending: false }),
+      supabase
+        .from('refunds')
+        .select('*')
+        .eq('is_deleted', false)
+        .ilike('subscriber_name', decodedName)
+        .order('date_of_approval', { ascending: false }),
     ]);
     setEstate(estateRes.data || null);
     setOffers(offersRes.data || []);
@@ -68,11 +77,14 @@ export default function SubscriberProfile() {
     setPayments(paymentsRes.data || []);
     setFeeConfig(feesRes.data || []);
     setDocs(docsRes.data || []);
-    // Filter COO to this estate when estate_id is present
     const coo = (cooRes.data || []).filter(
       (c) => !c.estate_id || c.estate_id === estateId
     );
     setCooRows(coo);
+    const ref = (refundRes.data || []).filter(
+      (r) => !r.estate_id || r.estate_id === estateId
+    );
+    setRefunds(ref);
     setLoading(false);
   }
 
@@ -124,19 +136,44 @@ export default function SubscriberProfile() {
   const propertyPct = expected.property > 0
     ? Math.round((paid.property / expected.property) * 100)
     : null;
+  const tdpPct = expected.legal_tdp > 0
+    ? Math.round((paid.legal_tdp / expected.legal_tdp) * 100)
+    : null;
+  const infraPct = expected.infrastructure > 0
+    ? Math.round((paid.infrastructure / expected.infrastructure) * 100)
+    : null;
+
+  const totalRefunded = refunds.reduce((s, r) => s + Number(r.amount_approved || 0), 0);
+  const totalCooFees = cooRows.reduce((s, r) => s + Number(r.amount_paid || 0), 0);
+  const totalPaidAll = (paid.property || 0) + (paid.infrastructure || 0) + (paid.legal_tdp || 0) + (paid.other || 0);
+  const totalExpectedAll = (expected.property || 0) + (expected.infrastructure || 0) + (expected.legal_tdp || 0);
+
+  // Compact headline for the right-hand summary card
+  const summaryBits = [];
+  if (propertyPct !== null) summaryBits.push(`Prop ${propertyPct}%`);
+  else if (paid.property > 0) summaryBits.push(`Prop ₦${paid.property.toLocaleString()}`);
+  if (paid.legal_tdp > 0 || expected.legal_tdp > 0) {
+    summaryBits.push(tdpPct !== null ? `TDP ${tdpPct}%` : `TDP ₦${paid.legal_tdp.toLocaleString()}`);
+  }
+  if (paid.infrastructure > 0 || expected.infrastructure > 0) {
+    summaryBits.push(infraPct !== null ? `Infra ${infraPct}%` : `Infra ₦${paid.infrastructure.toLocaleString()}`);
+  }
+  if (paid.other > 0) summaryBits.push(`Other ₦${paid.other.toLocaleString()}`);
+  if (totalRefunded > 0) summaryBits.push(`Refund ₦${totalRefunded.toLocaleString()}`);
+  if (totalCooFees > 0) summaryBits.push(`COO ₦${totalCooFees.toLocaleString()}`);
 
   const allRemarks = [
     ...offers.map((o) => o.comment).filter(Boolean),
     ...offers.map((o) => o.remarks).filter(Boolean),
     ...allocations.map((a) => a.remarks).filter(Boolean),
     ...payments.map((p) => p.remarks).filter(Boolean),
+    ...refunds.map((r) => r.remarks || r.reason).filter(Boolean),
+    ...cooRows.map((c) => c.comments || c.reason).filter(Boolean),
   ];
 
   function formatBalance(exp, paidAmt) {
     if (!(exp > 0)) return '—';
-    const bal = exp - paidAmt;
-    // Show signed balance: negative means overpaid
-    return bal.toLocaleString();
+    return (exp - paidAmt).toLocaleString();
   }
 
   function formatPct(exp, paidAmt) {
@@ -173,10 +210,104 @@ export default function SubscriberProfile() {
           <div className="label">Allocation Status</div>
         </div>
         <div className="stat-card grey">
-          <div className="value">
-            {propertyPct !== null ? `${propertyPct}%` : (paid.property > 0 ? 'Cost not set' : '—')}
+          <div className="value" style={{ fontSize: summaryBits.length > 2 ? 15 : undefined, lineHeight: 1.25 }}>
+            {summaryBits.length > 0 ? summaryBits.join(' · ') : '—'}
           </div>
-          <div className="label">Property Cost Paid</div>
+          <div className="label">Financial Summary</div>
+        </div>
+      </div>
+
+      <div className="card">
+        <h3>Complete Financial Commitment</h3>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th className="right">Expected</th>
+                <th className="right">Paid / Done</th>
+                <th className="right">Balance</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Property</td>
+                <td className="right">{expected.property > 0 ? expected.property.toLocaleString() : <span className="muted">Not set</span>}</td>
+                <td className="right">{paid.property.toLocaleString()}</td>
+                <td className="right">{formatBalance(expected.property, paid.property)}</td>
+                <td>
+                  {formatPct(expected.property, paid.property)}
+                  {expected.property > 0 && paid.property >= expected.property && (
+                    <span className="tag approved" style={{ marginLeft: 6 }}>Complete</span>
+                  )}
+                  {expected.property > 0 && paid.property > expected.property && (
+                    <span className="tag approved" style={{ marginLeft: 6 }}>Overpaid</span>
+                  )}
+                </td>
+              </tr>
+              <tr>
+                <td>Infrastructure</td>
+                <td className="right">{expected.infrastructure > 0 ? expected.infrastructure.toLocaleString() : <span className="muted">Not set</span>}</td>
+                <td className="right">{paid.infrastructure.toLocaleString()}</td>
+                <td className="right">{formatBalance(expected.infrastructure, paid.infrastructure)}</td>
+                <td>{formatPct(expected.infrastructure, paid.infrastructure)}</td>
+              </tr>
+              <tr>
+                <td>Legal / TDP</td>
+                <td className="right">{expected.legal_tdp > 0 ? expected.legal_tdp.toLocaleString() : <span className="muted">Not set</span>}</td>
+                <td className="right">{paid.legal_tdp.toLocaleString()}</td>
+                <td className="right">{formatBalance(expected.legal_tdp, paid.legal_tdp)}</td>
+                <td>
+                  {formatPct(expected.legal_tdp, paid.legal_tdp)}
+                  {paid.legal_tdp > 0 && expected.legal_tdp > 0 && paid.legal_tdp >= expected.legal_tdp && (
+                    <span className="tag approved" style={{ marginLeft: 6 }}>TDP paid</span>
+                  )}
+                  {paid.legal_tdp === 0 && expected.legal_tdp > 0 && (
+                    <span className="tag PO" style={{ marginLeft: 6 }}>TDP outstanding</span>
+                  )}
+                </td>
+              </tr>
+              {paid.other > 0 && (
+                <tr>
+                  <td>Other payments</td>
+                  <td className="right">—</td>
+                  <td className="right">{paid.other.toLocaleString()}</td>
+                  <td className="right">—</td>
+                  <td><span className="tag">Recorded</span></td>
+                </tr>
+              )}
+              <tr>
+                <td><b>Total payments in</b></td>
+                <td className="right">{totalExpectedAll > 0 ? totalExpectedAll.toLocaleString() : '—'}</td>
+                <td className="right"><b>{totalPaidAll.toLocaleString()}</b></td>
+                <td className="right">{totalExpectedAll > 0 ? (totalExpectedAll - totalPaidAll).toLocaleString() : '—'}</td>
+                <td />
+              </tr>
+              <tr>
+                <td>Refunds issued</td>
+                <td className="right">—</td>
+                <td className="right">{totalRefunded > 0 ? totalRefunded.toLocaleString() : '0'}</td>
+                <td className="right">—</td>
+                <td>
+                  {refunds.length > 0
+                    ? <span className="tag rejected">{refunds.length} refund(s)</span>
+                    : <span className="muted">None</span>}
+                </td>
+              </tr>
+              <tr>
+                <td>Change of Ownership (COO) fees</td>
+                <td className="right">—</td>
+                <td className="right">{totalCooFees > 0 ? totalCooFees.toLocaleString() : '0'}</td>
+                <td className="right">—</td>
+                <td>
+                  {cooRows.length > 0
+                    ? <span className="tag PO">{cooRows.length} COO record(s)</span>
+                    : <span className="muted">None</span>}
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -311,37 +442,73 @@ export default function SubscriberProfile() {
         </div>
       </div>
 
-      {cooRows.length > 0 && (
-        <div className="card">
-          <h3>Change of Ownership History</h3>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Previous Owner</th>
-                  <th>New Owner</th>
-                  <th className="right">COO Fee (₦)</th>
-                  <th>Reason</th>
-                  <th>Remarks</th>
+      <div className="card">
+        <h3>Refunds</h3>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th className="right">Amount Refunded (₦)</th>
+                <th>Property Type</th>
+                <th>Reason</th>
+                <th>Remarks</th>
+              </tr>
+            </thead>
+            <tbody>
+              {refunds.map((r) => (
+                <tr key={r.id}>
+                  <td>{r.date_of_approval || '—'}</td>
+                  <td className="right"><b>{Number(r.amount_approved || 0).toLocaleString()}</b></td>
+                  <td>{r.property_type || '—'}</td>
+                  <td>{r.reason || '—'}</td>
+                  <td>{r.remarks || '—'}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {cooRows.map((c) => (
-                  <tr key={c.id}>
-                    <td>{c.date_changed || '—'}</td>
-                    <td>{c.previous_owner}</td>
-                    <td>{c.new_owner}</td>
-                    <td className="right">{Number(c.amount_paid || 0).toLocaleString()}</td>
-                    <td>{c.reason || '—'}</td>
-                    <td>{c.comments || c.remarks || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+              ))}
+              {refunds.length === 0 && (
+                <tr><td colSpan={5} className="empty-state">No refunds recorded for this subscriber in this estate.</td></tr>
+              )}
+            </tbody>
+          </table>
         </div>
-      )}
+      </div>
+
+      <div className="card">
+        <h3>Change of Ownership (COO)</h3>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Previous Owner</th>
+                <th>New Owner</th>
+                <th className="right">COO Fee (₦)</th>
+                <th>Reason</th>
+                <th>Remarks</th>
+              </tr>
+            </thead>
+            <tbody>
+              {cooRows.map((c) => (
+                <tr key={c.id}>
+                  <td>{c.date_changed || '—'}</td>
+                  <td>{c.previous_owner}</td>
+                  <td>{c.new_owner}</td>
+                  <td className="right">{Number(c.amount_paid || 0).toLocaleString()}</td>
+                  <td>{c.reason || '—'}</td>
+                  <td>{c.comments || c.remarks || '—'}</td>
+                </tr>
+              ))}
+              {cooRows.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="empty-state">
+                    No COO records for this name in this estate. Record one from Allocations → the house row → <b>Record COO</b>.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
 
       <div className="card">
         <h3>Subscriber Documents</h3>
