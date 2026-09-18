@@ -217,17 +217,78 @@ export function allocatePaymentSummary(payments, offers, feeConfig, propertyType
     expected.legal_tdp = Number(cfg.expected_legal_tdp_fee || 0);
   }
 
-  // Display allocation:
-  // Show full amount paid under Property (so % can exceed 100).
-  // Explicit TDP / infra stay in their columns.
-  // "other" typed payments stay under Other.
-  // Excess over property cost is still visible via negative balance / % > 100.
+  // Smart display allocation:
+  // 1. Start with amounts as recorded (property / explicit TDP / infra / other).
+  // 2. If property payments exceed expected property cost AND TDP is still
+  //    outstanding, move the matching excess into Legal/TDP (common when the
+  //    subscriber paid one lump sum covering property + TDP without a separate
+  //    TDP receipt line).
+  // 3. Any leftover excess stays on Property (shown as overpay).
+  const notes = [];
+  let propertyDisplay = paidRaw.property;
+  let tdpDisplay = paidRaw.legal_tdp;
+  let infraDisplay = paidRaw.infrastructure;
+  let otherDisplay = paidRaw.other;
+
+  const propertyExcess = expected.property > 0
+    ? Math.max(0, propertyDisplay - expected.property)
+    : 0;
+  const tdpOutstanding = expected.legal_tdp > 0
+    ? Math.max(0, expected.legal_tdp - tdpDisplay)
+    : 0;
+
+  if (propertyExcess > 0 && tdpOutstanding > 0) {
+    const moved = Math.min(propertyExcess, tdpOutstanding);
+    // Only auto-balance when the excess is in the same ballpark as TDP
+    // (covers it, or is within 5% / ₦5,000 of it). Avoids moving huge
+    // unrelated overpayments into TDP.
+    const nearTdp =
+      propertyExcess + 1 >= tdpOutstanding || // covers TDP fully
+      Math.abs(propertyExcess - tdpOutstanding) <= Math.max(5000, tdpOutstanding * 0.05);
+
+    if (moved > 0 && nearTdp) {
+      propertyDisplay -= moved;
+      tdpDisplay += moved;
+      const hadExplicitTdp = paidRaw.legal_tdp > 0;
+      if (hadExplicitTdp) {
+        notes.push(
+          `₦${moved.toLocaleString()} of property overpayment was applied to Legal/TDP to complete the outstanding TDP (in addition to ₦${paidRaw.legal_tdp.toLocaleString()} already recorded as TDP).`
+        );
+      } else {
+        notes.push(
+          `₦${moved.toLocaleString()} was balanced from property overpayment into Legal/TDP (no separate TDP receipt was recorded; system matched the excess to the expected TDP of ₦${expected.legal_tdp.toLocaleString()}).`
+        );
+      }
+    }
+  }
+
+  // Optional: same idea for infrastructure if configured and still outstanding
+  const propertyExcessAfterTdp = expected.property > 0
+    ? Math.max(0, propertyDisplay - expected.property)
+    : 0;
+  const infraOutstanding = expected.infrastructure > 0
+    ? Math.max(0, expected.infrastructure - infraDisplay)
+    : 0;
+  if (propertyExcessAfterTdp > 0 && infraOutstanding > 0) {
+    const moved = Math.min(propertyExcessAfterTdp, infraOutstanding);
+    const nearInfra =
+      propertyExcessAfterTdp + 1 >= infraOutstanding ||
+      Math.abs(propertyExcessAfterTdp - infraOutstanding) <= Math.max(5000, infraOutstanding * 0.05);
+    if (moved > 0 && nearInfra) {
+      propertyDisplay -= moved;
+      infraDisplay += moved;
+      notes.push(
+        `₦${moved.toLocaleString()} was balanced from property overpayment into Infrastructure (expected ₦${expected.infrastructure.toLocaleString()}).`
+      );
+    }
+  }
+
   const display = {
-    property: paidRaw.property,
-    infrastructure: paidRaw.infrastructure,
-    legal_tdp: paidRaw.legal_tdp,
-    other: paidRaw.other,
+    property: propertyDisplay,
+    infrastructure: infraDisplay,
+    legal_tdp: tdpDisplay,
+    other: otherDisplay,
   };
 
-  return { expected, paid: display, paidRaw };
+  return { expected, paid: display, paidRaw, notes };
 }
