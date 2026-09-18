@@ -211,7 +211,7 @@ export default function SubscriberProfile() {
     || allocations.find((a) => a.phone_number)?.phone_number;
   const email = offers.find((o) => o.email_address)?.email_address;
 
-  const { expected, paid } = allocatePaymentSummary(payments, offers, feeConfig, propertyTypes);
+  const { expected, paid, notes: balanceNotes } = allocatePaymentSummary(payments, offers, feeConfig, propertyTypes);
 
   const propertyPct = expected.property > 0
     ? Math.round((paid.property / expected.property) * 100)
@@ -389,6 +389,14 @@ export default function SubscriberProfile() {
             </tbody>
           </table>
         </div>
+        {balanceNotes && balanceNotes.length > 0 && (
+          <div style={{ marginTop: 12, padding: '10px 12px', background: '#f0f9ff', borderRadius: 8, border: '1px solid #bae6fd' }}>
+            <b>System balancing notes</b>
+            <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+              {balanceNotes.map((n, i) => <li key={i}>{n}</li>)}
+            </ul>
+          </div>
+        )}
       </div>
 
       <div className="grid cols-2">
