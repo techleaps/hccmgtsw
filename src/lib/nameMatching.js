@@ -64,6 +64,18 @@ export function nameTokens(s) {
   return normalizePersonName(s).split(' ').filter((w) => w.length > 1);
 }
 
+/** Same person if same tokens in any order (Emmanuel Ajala vs Ajala Emmanuel). */
+export function sortedTokenKey(s) {
+  return nameTokens(s).slice().sort().join(' ');
+}
+
+export function sameTokenBag(a, b) {
+  const ka = sortedTokenKey(a);
+  const kb = sortedTokenKey(b);
+  return !!ka && ka === kb;
+}
+
+
 /**
  * Score 0–1 how likely two display names are the same person.
  * ≥ 0.82 → strong flag candidate
@@ -77,6 +89,7 @@ export function nameSimilarity(a, b) {
   const ba = basePersonKey(a);
   const bb = basePersonKey(b);
   if (ba && bb && ba === bb) return 0.95;
+  if (sameTokenBag(a, b)) return 0.98;
   if (na.includes(nb) || nb.includes(na)) return 0.92;
 
   const ta = nameTokens(a);

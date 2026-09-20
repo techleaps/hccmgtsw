@@ -6,6 +6,8 @@ import {
   findDuplicateGroups,
   normalizePersonName,
   basePersonKey,
+  sortedTokenKey,
+  sameTokenBag,
 } from '../lib/nameMatching';
 
 const NAME_TABLES = [
@@ -74,6 +76,34 @@ async function renameAcrossTables(estateId, fromName, toName) {
   return { updated, errors };
 }
 
+/** Prefer allocation spelling, then one with payments, then longest. */
+function pickCanonical(members) {
+  const list = members || [];
+  const withAlloc = list.find((m) => (m.sources || []).includes('Allocation'));
+  if (withAlloc) return withAlloc.name;
+  const withPay = list.find((m) => (m.sources || []).includes('Payment'));
+  if (withPay) return withPay.name;
+  return [...list].sort((a, b) => String(b.name).length - String(a.name).length)[0]?.name || '';
+}
+
+function isSafeAutoMergeGroup(group) {
+  // All members share the same token bag (order/title only differences)
+  const keys = new Set(group.members.map((m) => sortedTokenKey(m.name)));
+  if (keys.size !== 1 || ![...keys][0]) return false;
+  // If multiple distinct unit indexes of same type, treat as multi-unit — skip auto
+  const indexes = group.members.map((m) => m.unitIndex).filter(Boolean);
+  if (new Set(indexes).size > 1) return false;
+  // Different house numbers on same property type with both having allocations can be 2 units
+  const houses = group.members.flatMap((m) => m.houses || []);
+  const pts = group.members.flatMap((m) => m.propertyTypes || []);
+  if (new Set(houses).size > 1 && new Set(pts).size === 1 && houses.length > 1) {
+    // possible multi-unit same type — still allow auto only if token bag same AND user opts "include multi-house"
+    return false;
+  }
+  return true;
+}
+
+
 export default function DuplicatesTab() {
   const [estates, setEstates] = useState([]);
   const [estateId, setEstateId] = useState('');
@@ -87,6 +117,8 @@ export default function DuplicatesTab() {
   const [mergeGroup, setMergeGroup] = useState(null);
   const [mergeCanonical, setMergeCanonical] = useState('');
   const [mergeSelected, setMergeSelected] = useState([]);
+  const [selectedGroups, setSelectedGroups] = useState(() => new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   useEffect(() => {
     supabase.from('estates').select('*').eq('is_deleted', false).order('name')
@@ -158,6 +190,7 @@ export default function DuplicatesTab() {
       }));
 
       setGroups(findDuplicateGroups(rows, 'name', Number(threshold) || 0.82));
+      setSelectedGroups(new Set());
     } catch (err) {
       console.error(err);
       setError(err.message || 'Scan failed');
@@ -232,6 +265,67 @@ export default function DuplicatesTab() {
     runScan();
   }
 
+
+  function toggleGroup(gi) {
+    setSelectedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(gi)) next.delete(gi);
+      else next.add(gi);
+      return next;
+    });
+  }
+
+  function selectSafeGroups() {
+    const next = new Set();
+    groups.forEach((g, gi) => {
+      if (isSafeAutoMergeGroup(g) && (g.score || 0) >= 0.95) next.add(gi);
+    });
+    setSelectedGroups(next);
+  }
+
+  function selectAllGroups() {
+    setSelectedGroups(new Set(groups.map((_, i) => i)));
+  }
+
+  function clearSelection() {
+    setSelectedGroups(new Set());
+  }
+
+  async function bulkMergeSelected() {
+    const indices = [...selectedGroups].sort((a, b) => a - b);
+    if (!indices.length) { alert('Select at least one group.'); return; }
+    const preview = indices.map((i) => {
+      const g = groups[i];
+      const can = pickCanonical(g.members);
+      return `• ${g.members.map((m) => m.name).join(' / ')} → "${can}"`;
+    }).join('\n');
+    if (!confirm(
+      `Merge ${indices.length} group(s)?\n\nRule: keep Allocation name when present, else Payment, else longest.\n\n${preview.slice(0, 1500)}${preview.length > 1500 ? '\n…' : ''}`
+    )) return;
+
+    setBulkBusy(true);
+    let total = 0;
+    const errors = [];
+    let mergedGroups = 0;
+    for (const i of indices) {
+      const g = groups[i];
+      const canonical = pickCanonical(g.members);
+      if (!canonical) continue;
+      for (const m of g.members) {
+        if (m.name === canonical) continue;
+        const { updated, errors: errs } = await renameAcrossTables(estateId, m.name, canonical);
+        total += updated;
+        if (errs?.length) errors.push(...errs);
+      }
+      mergedGroups += 1;
+    }
+    setBulkBusy(false);
+    if (errors.length) alert(`Bulk merge done with issues:\n${errors.slice(0, 8).join('\n')}\n\nGroups: ${mergedGroups}, rows: ${total}`);
+    else alert(`Merged ${mergedGroups} group(s), ${total} row(s) updated.`);
+    setSelectedGroups(new Set());
+    runScan();
+  }
+
   return (
     <div>
       <div className="page-title">
@@ -271,6 +365,37 @@ export default function DuplicatesTab() {
         {error && <div className="error-text" style={{ marginTop: 8 }}>{error}</div>}
       </div>
 
+      {groups.length > 0 && (
+        <div className="card" style={{ background: '#f8fafc' }}>
+          <h3 style={{ marginTop: 0 }}>Bulk merge</h3>
+          <p className="muted">
+            Safe picks = same name tokens in any order or title only
+            (e.g. Maj Moses vs MAJOR MOSES, or first/last name swapped).
+            Keeps the <b>Allocation</b> spelling when available so payments link to the house.
+            Groups with two different house numbers of the same type are skipped by &quot;Select safe&quot;.
+          </p>
+          <div className="flex wrap" style={{ gap: 8 }}>
+            <button type="button" className="btn btn-outline btn-sm" onClick={selectSafeGroups} disabled={bulkBusy}>
+              Select safe high-confidence groups
+            </button>
+            <button type="button" className="btn btn-outline btn-sm" onClick={selectAllGroups} disabled={bulkBusy}>
+              Select all groups
+            </button>
+            <button type="button" className="btn btn-outline btn-sm" onClick={clearSelection} disabled={bulkBusy}>
+              Clear selection
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={bulkMergeSelected}
+              disabled={bulkBusy || selectedGroups.size === 0}
+            >
+              {bulkBusy ? 'Merging…' : `Merge selected (${selectedGroups.size})`}
+            </button>
+          </div>
+        </div>
+      )}
+
       {!loading && groups.length === 0 && estateId && (
         <p className="muted">No likely duplicate groups found for {estateName}.</p>
       )}
@@ -280,11 +405,18 @@ export default function DuplicatesTab() {
         return (
           <div className="card" key={gi} style={{ borderLeft: `4px solid ${multi ? '#3b82f6' : '#f59e0b'}` }}>
             <div className="flex wrap" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-              <h3 style={{ margin: 0 }}>
+              <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
+                <input
+                  type="checkbox"
+                  checked={selectedGroups.has(gi)}
+                  onChange={() => toggleGroup(gi)}
+                  title="Select for bulk merge"
+                />
                 Group {gi + 1} · {(g.score * 100).toFixed(0)}%
+                {isSafeAutoMergeGroup(g) && <span className="tag approved" style={{ marginLeft: 4 }}>Safe auto</span>}
                 {multi && <span className="tag PO" style={{ marginLeft: 8 }}>Multi-unit Name 1/2 — review before merge</span>}
               </h3>
-              <button type="button" className="btn btn-primary btn-sm" onClick={() => openMerge(g)} disabled={!!busy}>
+              <button type="button" className="btn btn-primary btn-sm" onClick={() => openMerge(g)} disabled={!!busy || bulkBusy}>
                 Merge group…
               </button>
             </div>
