@@ -343,7 +343,25 @@ export default function Dashboard() {
           <Link className="btn btn-outline" to="/approvals">Approvals / Expenditure</Link>
           <Link className="btn btn-outline" to="/refunds">Refunds</Link>
           <Link className="btn btn-outline" to="/documents">Documents</Link>
+          <Link className="btn btn-outline" to="/construction">Construction</Link>
+          <Link className="btn btn-outline" to="/contracts">Award of Contract</Link>
         </div>
+      </div>
+
+      <div className="card">
+        <h3>MD / AA snapshot guide</h3>
+        <p className="muted" style={{ marginTop: 0 }}>
+          For decision-ready numbers open these in order:
+        </p>
+        <ol style={{ margin: 0, paddingLeft: 20, lineHeight: 1.7 }}>
+          <li><Link to="/offers">Offers</Link> — provisional offers printed / collected</li>
+          <li><Link to="/payments">Payments</Link> — amounts by estate</li>
+          <li><Link to="/analysis">Payment Analysis</Link> — 100% paid not yet allocated, 60–99%, below 60%</li>
+          <li><Link to="/allocations">Allocations</Link> — final allocations issued / collected</li>
+          <li><Link to="/construction">Construction</Link> — unit status by block (A/B/C/D)</li>
+          <li><Link to="/contracts">Award of Contract</Link> — contractors, amounts, houses</li>
+          <li><Link to="/coo">Change of Ownership</Link> — reallocation history</li>
+        </ol>
       </div>
     </div>
   );

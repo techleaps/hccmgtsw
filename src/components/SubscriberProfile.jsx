@@ -74,6 +74,7 @@ export default function SubscriberProfile() {
   const [docs, setDocs] = useState([]);
   const [cooRows, setCooRows] = useState([]);
   const [refunds, setRefunds] = useState([]);
+  const [constructionUnits, setConstructionUnits] = useState([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [docType, setDocType] = useState(DOC_TYPES[0]);
@@ -165,6 +166,20 @@ export default function SubscriberProfile() {
         || String(r.subscriber_name || '').toLowerCase().includes(safeName.toLowerCase());
     });
     setRefunds(ref);
+
+    // Construction units linked by allocated house numbers
+    const houseNos = [...new Set(allocs.map((a) => (a.house_no || '').trim()).filter(Boolean))];
+    if (houseNos.length) {
+      const { data: cu } = await supabase
+        .from('construction_units')
+        .select('*')
+        .eq('estate_id', estateId)
+        .eq('is_deleted', false)
+        .in('house_no', houseNos);
+      setConstructionUnits(cu || []);
+    } else {
+      setConstructionUnits([]);
+    }
     setLoading(false);
   }
 
@@ -211,7 +226,7 @@ export default function SubscriberProfile() {
     || allocations.find((a) => a.phone_number)?.phone_number;
   const email = offers.find((o) => o.email_address)?.email_address;
 
-  const { expected, paid, notes: balanceNotes } = allocatePaymentSummary(payments, offers, feeConfig, propertyTypes);
+  const { expected, paid } = allocatePaymentSummary(payments, offers, feeConfig, propertyTypes);
 
   const propertyPct = expected.property > 0
     ? Math.round((paid.property / expected.property) * 100)
@@ -294,6 +309,31 @@ export default function SubscriberProfile() {
             {summaryBits.length > 0 ? summaryBits.join(' · ') : '—'}
           </div>
           <div className="label">Financial Summary</div>
+        </div>
+      </div>
+
+      <div className="card">
+        <h3>Subscription workflow status</h3>
+        <div className="flex wrap" style={{ gap: 8 }}>
+          {[
+            { label: 'Offer on file', ok: offers.length > 0 },
+            { label: 'Offer printed', ok: offers.some((o) => o.offer_printed) },
+            { label: 'Offer collected', ok: offers.some((o) => o.offer_collected) },
+            { label: 'Payments recorded', ok: payments.length > 0 || paid.property > 0 },
+            { label: 'Property fully paid', ok: expected.property > 0 && paid.property >= expected.property },
+            { label: 'TDP settled', ok: expected.legal_tdp <= 0 || paid.legal_tdp >= expected.legal_tdp },
+            { label: 'Allocated (FA)', ok: allocations.length > 0 },
+            { label: 'FA collected', ok: allocations.some((a) => a.collected) },
+            { label: 'Construction linked', ok: constructionUnits.length > 0 },
+          ].map((s) => (
+            <span
+              key={s.label}
+              className={s.ok ? 'tag approved' : 'tag'}
+              style={{ opacity: s.ok ? 1 : 0.55 }}
+            >
+              {s.ok ? '✓' : '○'} {s.label}
+            </span>
+          ))}
         </div>
       </div>
 
@@ -389,14 +429,6 @@ export default function SubscriberProfile() {
             </tbody>
           </table>
         </div>
-        {balanceNotes && balanceNotes.length > 0 && (
-          <div style={{ marginTop: 12, padding: '10px 12px', background: '#f0f9ff', borderRadius: 8, border: '1px solid #bae6fd' }}>
-            <b>System balancing notes</b>
-            <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
-              {balanceNotes.map((n, i) => <li key={i}>{n}</li>)}
-            </ul>
-          </div>
-        )}
       </div>
 
       <div className="grid cols-2">
@@ -596,6 +628,43 @@ export default function SubscriberProfile() {
             </tbody>
           </table>
         </div>
+      </div>
+
+      <div className="card">
+        <h3>Construction / Contractor</h3>
+        {constructionUnits.length === 0 ? (
+          <p className="muted">
+            No construction unit linked. When this subscriber has a house number on their allocation
+            and that unit exists under <b>Construction</b>, the contractor appears here.
+          </p>
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>House No</th>
+                  <th>Property type</th>
+                  <th>Contractor</th>
+                  <th>Phone</th>
+                  <th>Status of work</th>
+                  <th>Remarks</th>
+                </tr>
+              </thead>
+              <tbody>
+                {constructionUnits.map((u) => (
+                  <tr key={u.id}>
+                    <td><b>{u.house_no}</b></td>
+                    <td>{u.property_type || '—'}</td>
+                    <td>{u.contractor_name || '—'}</td>
+                    <td>{u.contractor_phone || '—'}</td>
+                    <td>{u.status_of_work || '—'}</td>
+                    <td>{u.remarks || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       <div className="card">

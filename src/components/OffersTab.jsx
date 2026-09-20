@@ -16,19 +16,18 @@ const BLANK = {
 };
 
 export const OFFER_FIELD_DEFS = [
-  { key: 'subscriber_name', label: 'Subscriber Name', type: 'text', required: true, synonyms: ['subscriber', 'subscriber name', 'name'] },
-  { key: 'form_no', label: 'Form No / PON', type: 'text', synonyms: ['form no', 'form number', 'pon'] },
-  { key: 'property_type', label: 'Property Type', type: 'text', synonyms: ['property type', 'type'] },
+  { key: 'subscriber_name', label: 'Subscriber Name', type: 'text', required: true, synonyms: ['subscriber', 'subscriber name', 'name', 'suscriber name', 'suscriber'] },
+  { key: 'form_no', label: 'Form No / PON', type: 'text', synonyms: ['form no', 'form number', 'pon', 'pon no'] },
+  { key: 'property_type', label: 'Property Type', type: 'text', synonyms: ['property type', 'type', 'house type'] },
   { key: 'phone_number', label: 'Phone Number', type: 'text', synonyms: ['phone number', 'phone', 'tel', 'telephone'] },
-  { key: 'email_address', label: 'Email Address', type: 'text', synonyms: ['email address', 'email'] },
-  { key: 'offer_printed', label: 'Offer Printed', type: 'checkbox', synonyms: ['offer printed', 'printed'] },
-  { key: 'offer_collected', label: 'Offer Collected', type: 'checkbox', synonyms: ['offer collected', 'collected'] },
+  { key: 'email_address', label: 'Email Address', type: 'text', synonyms: ['email address', 'email', 'e-mail'] },
+  { key: 'offer_printed', label: 'Offer Printed', type: 'checkbox', synonyms: ['offer printed', 'printed', 'offer print'] },
+  { key: 'offer_collected', label: 'Offer Collected', type: 'checkbox', synonyms: ['offer collected', 'collected', 'offer'] },
   { key: 'offer_collected_by', label: 'Offer Collected By', type: 'text', synonyms: ['offer collected by', 'collected by', 'offer xcollected by'] },
   { key: 'offer_collected_date', label: 'Offer Collected On', type: 'date', synonyms: ['offer collected on', 'collected on', 'date collected'] },
-  { key: 'amount_paid', label: 'Amount Paid', type: 'number',
-    synonyms: ['total amount paid', 'amount paid', 'total paid', 'amount'] },
+  { key: 'amount_paid', label: 'Amount Paid (on offer)', type: 'number', synonyms: ['amount paid', 'amount', 'paid'] },
   { key: 'comment', label: 'Comment', type: 'text', synonyms: ['comment', 'comments'] },
-  { key: 'remarks', label: 'Remarks', type: 'text', synonyms: ['remarks'] },
+  { key: 'remarks', label: 'Remarks', type: 'text', synonyms: ['remarks', 'remark', 'note', 'notes'] },
 ];
 
 export default function OffersTab() {
