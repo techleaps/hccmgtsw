@@ -27,9 +27,10 @@ import AuditLog from './components/AuditLog';
 import EditRequests from './components/EditRequests';
 import ConstructionTab from './components/ConstructionTab';
 import ContractAwardsTab from './components/ContractAwardsTab';
+import SystemDangerZone from './components/SystemDangerZone';
 
 export default function App() {
-  const { session, profile, loading, signOut, isAdmin, isSupervisorPlus } = useAuth();
+  const { session, profile, loading, signOut, isAdmin, isSupervisorPlus, isSuperAdmin } = useAuth();
   const [customTabs, setCustomTabs] = useState([]);
 
   useEffect(() => {
@@ -69,6 +70,7 @@ export default function App() {
           <NavLink to="/edit-requests">Edit/Delete Requests</NavLink>
           {isAdmin && <NavLink to="/custom-tabs">Custom Tabs</NavLink>}
           {isAdmin && <NavLink to="/users">Users &amp; Access</NavLink>}
+          {isSuperAdmin && <NavLink to="/system-clear">Clear All Data</NavLink>}
           {isSupervisorPlus && <NavLink to="/audit-log">Audit Log</NavLink>}
         </nav>
       </aside>
@@ -109,6 +111,7 @@ export default function App() {
             <Route path="/custom-tabs" element={<CustomTabsAdmin onTabsChanged={() => supabase.from('custom_tabs').select('*').eq('is_deleted', false).order('created_at').then(({ data }) => setCustomTabs(data || []))} />} />
             <Route path="/edit-requests" element={<EditRequests />} />
             <Route path="/users" element={<UsersAdmin />} />
+            <Route path="/system-clear" element={<SystemDangerZone />} />
             <Route path="/audit-log" element={<AuditLog />} />
             <Route path="/account/change-password" element={<ChangePassword />} />
             <Route path="*" element={<Navigate to="/" />} />

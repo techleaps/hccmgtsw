@@ -4,6 +4,7 @@ import { useAuth } from '../lib/AuthContext';
 import { submitOrApplyUpdate, submitOrApplyDelete } from '../lib/recordActions';
 import { fetchCustomFields } from '../lib/customFields';
 import { blankToNull } from '../lib/sanitize';
+import DocumentAttachments from './DocumentAttachments';
 import ManageColumnsModal from './ManageColumnsModal';
 import { CustomFieldInputs, CustomFieldHeaders, CustomFieldCells } from './CustomFieldWidgets';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
@@ -239,7 +240,14 @@ export default function ApprovalsTab() {
               <div className="field"><label>Comments</label><textarea rows={2} value={form.comments} onChange={(e) => setForm({ ...form, comments: e.target.value })} /></div>
               <div className="field"><label>Remarks</label><input value={form.remarks} onChange={(e) => setForm({ ...form, remarks: e.target.value })} /></div>
               {error && <div className="error-text">{error}</div>}
-              <div className="modal-actions">
+                            {editingRow && (
+                <DocumentAttachments
+                  linkedTable="approvals_expenditures"
+                  linkedRecordId={editingRow.id}
+                  title="Supporting documents"
+                />
+              )}
+<div className="modal-actions">
                 <button type="button" className="btn btn-outline" onClick={() => setShowModal(false)}>Cancel</button>
                 <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
               </div>

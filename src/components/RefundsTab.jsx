@@ -6,6 +6,7 @@ import { fetchCustomFields } from '../lib/customFields';
 import { blankToNull } from '../lib/sanitize';
 import ManageColumnsModal from './ManageColumnsModal';
 import BulkImportModal from './BulkImportModal';
+import DocumentAttachments from './DocumentAttachments';
 import { CustomFieldInputs, CustomFieldHeaders, CustomFieldCells } from './CustomFieldWidgets';
 
 const BLANK = {
@@ -536,7 +537,16 @@ export default function RefundsTab() {
                 <input value={form.remarks} onChange={(e) => setForm({ ...form, remarks: e.target.value })} />
               </div>
               {error && <div className="error-text">{error}</div>}
-              <div className="modal-actions">
+                            {editingRow && (
+                <DocumentAttachments
+                  linkedTable="refunds"
+                  linkedRecordId={editingRow.id}
+                  estateId={editingRow.estate_id}
+                  subscriberName={editingRow.subscriber_name}
+                  title="Refund documents"
+                />
+              )}
+<div className="modal-actions">
                 <button type="button" className="btn btn-outline" onClick={() => setShowModal(false)}>Cancel</button>
                 <button type="submit" className="btn btn-primary" disabled={saving}>
                   {saving ? 'Saving…' : 'Save'}

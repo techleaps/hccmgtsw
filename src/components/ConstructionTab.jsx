@@ -38,10 +38,11 @@ export default function ConstructionTab() {
 
   // Bulk create
   const [showBulk, setShowBulk] = useState(false);
-  const [bulkLetter, setBulkLetter] = useState('A');
+  const [bulkPrefix, setBulkPrefix] = useState('A');
+  const [bulkSuffix, setBulkSuffix] = useState('');
   const [bulkFrom, setBulkFrom] = useState(1);
   const [bulkTo, setBulkTo] = useState(10);
-  const [bulkType, setBulkType] = useState(BLOCK_TYPE_DEFAULTS.A);
+  const [bulkType, setBulkType] = useState('');
   const [bulkError, setBulkError] = useState('');
   const [bulkSaving, setBulkSaving] = useState(false);
 
@@ -75,7 +76,7 @@ export default function ConstructionTab() {
   }
 
   const filtered = useMemo(() => units.filter((u) => {
-    if (letterFilter && (u.block_letter || '').toUpperCase() !== letterFilter.toUpperCase()) return false;
+    if (letterFilter && !(u.house_no || '').toUpperCase().startsWith(letterFilter.toUpperCase()) && (u.block_letter || '').toUpperCase() !== letterFilter.toUpperCase()) return false;
     if (statusFilter && u.status_of_work !== statusFilter) return false;
     const hay = `${u.house_no} ${u.property_name || ''} ${u.contractor_name || ''} ${u.remarks || ''}`.toLowerCase();
     return hay.includes(search.toLowerCase());
@@ -124,11 +125,11 @@ export default function ConstructionTab() {
   async function handleBulkCreate(e) {
     e.preventDefault();
     setBulkError('');
-    const letter = String(bulkLetter || '').trim().toUpperCase();
+    const prefix = String(bulkPrefix ?? '');
+    const suffix = String(bulkSuffix ?? '');
     const from = Number(bulkFrom);
     const to = Number(bulkTo);
-    if (!/^[A-Z]$/.test(letter)) { setBulkError('Block letter must be a single letter A–Z.'); return; }
-    if (!Number.isFinite(from) || !Number.isFinite(to) || from < 1 || to < from) {
+    if (!Number.isFinite(from) || !Number.isFinite(to) || from < 0 || to < from) {
       setBulkError('Enter a valid number range (e.g. 1 to 50).');
       return;
     }
@@ -137,18 +138,20 @@ export default function ConstructionTab() {
     setBulkSaving(true);
     const rows = [];
     for (let n = from; n <= to; n += 1) {
+      const houseNo = `${prefix}${n}${suffix}`;
+      // block_letter = leading letters only (optional analytics)
+      const letterMatch = houseNo.match(/^([A-Za-z]+)/);
       rows.push({
         estate_id: estateId,
-        house_no: `${letter}${n}`,
-        block_letter: letter,
+        house_no: houseNo,
+        block_letter: letterMatch ? letterMatch[1].toUpperCase() : null,
         unit_number: n,
-        property_type: bulkType || BLOCK_TYPE_DEFAULTS[letter] || null,
+        property_type: bulkType || null,
         property_name: null,
         status_of_work: 'Not started',
         created_by: profile.id,
       });
     }
-    // Upsert-like: insert, ignore duplicates on unique (estate_id, house_no)
     const { error } = await supabase.from('construction_units').upsert(rows, {
       onConflict: 'estate_id,house_no',
       ignoreDuplicates: true,
@@ -223,14 +226,15 @@ export default function ConstructionTab() {
         <div className="flex wrap">
           <Link className="btn btn-outline" to="/contracts">Award of Contract</Link>
           <button className="btn btn-primary" onClick={() => {
-            setBulkLetter('A');
+            setBulkPrefix('A');
             setBulkFrom(1);
             setBulkTo(10);
-            setBulkType(BLOCK_TYPE_DEFAULTS.A);
+            setBulkSuffix('');
+            setBulkType('');
             setBulkError('');
             setShowBulk(true);
           }}>
-            + Create units (letter + range)
+            + Create units (custom range)
           </button>
         </div>
       </div>
@@ -247,14 +251,9 @@ export default function ConstructionTab() {
 
       <div className="card">
         <div className="flex wrap">
-          <div style={{ minWidth: 120 }}>
-            <label>Block</label>
-            <select value={letterFilter} onChange={(e) => setLetterFilter(e.target.value)}>
-              <option value="">All</option>
-              {Object.keys(BLOCK_TYPE_DEFAULTS).map((L) => (
-                <option key={L} value={L}>{L} — {BLOCK_TYPE_DEFAULTS[L]}</option>
-              ))}
-            </select>
+          <div style={{ minWidth: 140 }}>
+            <label>Block / prefix filter</label>
+            <input value={letterFilter} onChange={(e) => setLetterFilter(e.target.value)} placeholder="A, LD, Plot…" />
           </div>
           <div style={{ minWidth: 160 }}>
             <label>Work status</label>
@@ -326,41 +325,39 @@ export default function ConstructionTab() {
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h3>Create house units</h3>
             <p className="muted">
-              Naming: <b>A</b> = 4BR Fully, <b>B</b> = 4BR Semi, <b>C</b> = 3BR, <b>D</b> = 2BR.
-              Enter letter and number range; system creates A1, A2, … automatically.
+              Define your own pattern. Examples:
+              prefix <b>A</b> + 1–50 → A1…A50;
+              prefix <b>A</b> + suffix <b>-2</b> → A1-2…A50-2 (Phase 2);
+              prefix <b>Plot </b> + 1–20 → Plot 1…Plot 20;
+              prefix <b>LD</b> or <b>MD</b> / <b>HD</b> as needed.
             </p>
             <form onSubmit={handleBulkCreate}>
-              <div className="grid cols-3">
+              <div className="grid cols-2">
                 <div className="field">
-                  <label>Block letter</label>
-                  <select
-                    value={bulkLetter}
-                    onChange={(e) => {
-                      const L = e.target.value;
-                      setBulkLetter(L);
-                      setBulkType(BLOCK_TYPE_DEFAULTS[L] || bulkType);
-                    }}
-                  >
-                    {Object.keys(BLOCK_TYPE_DEFAULTS).map((L) => (
-                      <option key={L} value={L}>{L}</option>
-                    ))}
-                  </select>
+                  <label>Prefix (letters/text before the number)</label>
+                  <input value={bulkPrefix} onChange={(e) => setBulkPrefix(e.target.value)} placeholder="A  or  Plot  or  LD  or blank" />
                 </div>
                 <div className="field">
+                  <label>Suffix (text after the number)</label>
+                  <input value={bulkSuffix} onChange={(e) => setBulkSuffix(e.target.value)} placeholder="-2  or  -2B  or blank" />
+                </div>
+              </div>
+              <div className="grid cols-2">
+                <div className="field">
                   <label>From number</label>
-                  <input type="number" min={1} value={bulkFrom} onChange={(e) => setBulkFrom(e.target.value)} />
+                  <input type="number" min={0} value={bulkFrom} onChange={(e) => setBulkFrom(e.target.value)} />
                 </div>
                 <div className="field">
                   <label>To number</label>
-                  <input type="number" min={1} value={bulkTo} onChange={(e) => setBulkTo(e.target.value)} />
+                  <input type="number" min={0} value={bulkTo} onChange={(e) => setBulkTo(e.target.value)} />
                 </div>
               </div>
               <div className="field">
-                <label>Property type label</label>
-                <input value={bulkType} onChange={(e) => setBulkType(e.target.value)} />
+                <label>Property type label (optional)</label>
+                <input value={bulkType} onChange={(e) => setBulkType(e.target.value)} placeholder="4 Bedroom Fully Detached, Land, etc." />
               </div>
               <p className="muted">
-                Will create: <b>{String(bulkLetter).toUpperCase()}{bulkFrom}</b> … <b>{String(bulkLetter).toUpperCase()}{bulkTo}</b>
+                Will create: <b>{bulkPrefix}{bulkFrom}{bulkSuffix}</b> … <b>{bulkPrefix}{bulkTo}{bulkSuffix}</b>
                 {' '}({Math.max(0, Number(bulkTo) - Number(bulkFrom) + 1)} units). Existing house numbers are skipped.
               </p>
               {bulkError && <div className="error-text">{bulkError}</div>}

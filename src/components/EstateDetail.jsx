@@ -15,6 +15,9 @@ export default function EstateDetail() {
   const [payments, setPayments] = useState([]);
   const [newType, setNewType] = useState(BLANK_TYPE_FORM);
   const [editingType, setEditingType] = useState(null);
+  const [editingEstate, setEditingEstate] = useState(false);
+  const [estateForm, setEstateForm] = useState({ name: '', category: '', description: '' });
+  const [estateSaving, setEstateSaving] = useState(false);
   const [editForm, setEditForm] = useState(BLANK_TYPE_FORM);
   const [loading, setLoading] = useState(true);
 
@@ -80,6 +83,30 @@ export default function EstateDetail() {
     load();
   }
 
+  function openEditEstate() {
+    setEstateForm({
+      name: estate?.name || '',
+      category: estate?.category || 'site_and_services',
+      description: estate?.description || '',
+    });
+    setEditingEstate(true);
+  }
+
+  async function saveEstate(e) {
+    e.preventDefault();
+    if (!estateForm.name.trim()) { alert('Estate name is required.'); return; }
+    setEstateSaving(true);
+    const { error } = await supabase.from('estates').update({
+      name: estateForm.name.trim(),
+      category: estateForm.category,
+      description: estateForm.description || null,
+    }).eq('id', id);
+    setEstateSaving(false);
+    if (error) { alert(error.message); return; }
+    setEditingEstate(false);
+    load();
+  }
+
   if (loading) return <p className="muted">Loading…</p>;
   if (!estate) return <div className="empty-state">Estate not found.</div>;
 
@@ -92,7 +119,42 @@ export default function EstateDetail() {
           <Link to="/estates" className="muted">&larr; Back to Estates</Link>
           <h2>{estate.name}</h2>
         </div>
+        {isAdmin && (
+          <button type="button" className="btn btn-outline" onClick={openEditEstate}>Edit Estate Name</button>
+        )}
       </div>
+
+      {editingEstate && (
+        <div className="modal-overlay" onClick={() => setEditingEstate(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Edit Estate</h3>
+            <form onSubmit={saveEstate}>
+              <div className="field">
+                <label>Estate Name</label>
+                <input value={estateForm.name} onChange={(e) => setEstateForm({ ...estateForm, name: e.target.value })} required />
+              </div>
+              <div className="field">
+                <label>Category</label>
+                <select value={estateForm.category} onChange={(e) => setEstateForm({ ...estateForm, category: e.target.value })}>
+                  <option value="site_and_services">Site and Services</option>
+                  <option value="carcass">Carcass</option>
+                  <option value="fully_built">Fully Built</option>
+                  <option value="mixed">Mixed</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+              <div className="field">
+                <label>Description</label>
+                <textarea rows={2} value={estateForm.description} onChange={(e) => setEstateForm({ ...estateForm, description: e.target.value })} />
+              </div>
+              <div className="modal-actions">
+                <button type="button" className="btn btn-outline" onClick={() => setEditingEstate(false)}>Cancel</button>
+                <button type="submit" className="btn btn-primary" disabled={estateSaving}>{estateSaving ? 'Saving…' : 'Save'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       <div className="grid cols-4">
         <div className="stat-card blue"><div className="value">{offers.length}</div><div className="label">Offers</div></div>

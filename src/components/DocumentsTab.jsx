@@ -23,6 +23,7 @@ export default function DocumentsTab() {
   const [linkUser, setLinkUser] = useState(preselectedUser);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [preview, setPreview] = useState(null);
 
   useEffect(() => {
     supabase.from('profiles').select('id, full_name, username').order('full_name').then(({ data }) => setUsers(data || []));
@@ -60,6 +61,12 @@ export default function DocumentsTab() {
     const url = await getDownloadUrl(doc.storage_path);
     if (url) window.open(url, '_blank');
     else alert('Could not generate a download link.');
+  }
+
+  async function handlePreview(doc) {
+    const url = await getDownloadUrl(doc.storage_path);
+    if (!url) { alert('Could not generate a preview link.'); return; }
+    setPreview({ url, mime: doc.mime_type || '', name: doc.file_name });
   }
 
   async function handleDelete(doc) {
@@ -104,6 +111,7 @@ export default function DocumentsTab() {
                   <td>{new Date(d.created_at).toLocaleDateString()}</td>
                   <td>
                     <div className="flex">
+                      <button className="btn btn-outline btn-sm" onClick={() => handlePreview(d)}>Preview</button>
                       <button className="btn btn-outline btn-sm" onClick={() => handleDownload(d)}>Download</button>
                       {isSupervisorPlus && <button className="btn btn-danger btn-sm" onClick={() => handleDelete(d)}>Delete</button>}
                     </div>
@@ -115,6 +123,7 @@ export default function DocumentsTab() {
           </table>
         )}
       </div>
+
 
       {showModal && (
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
@@ -145,6 +154,29 @@ export default function DocumentsTab() {
                 <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Uploading…' : 'Upload'}</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {preview && (
+        <div className="modal-overlay" onClick={() => setPreview(null)}>
+          <div className="modal" style={{ maxWidth: '90vw', width: 900 }} onClick={(e) => e.stopPropagation()}>
+            <div className="flex" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0 }}>{preview.name}</h3>
+              <div className="flex">
+                <a className="btn btn-outline btn-sm" href={preview.url} target="_blank" rel="noreferrer">Open in new tab</a>
+                <button type="button" className="btn btn-outline btn-sm" onClick={() => setPreview(null)}>Close</button>
+              </div>
+            </div>
+            <div style={{ marginTop: 12, maxHeight: '75vh', overflow: 'auto', background: '#f8fafc', borderRadius: 8 }}>
+              {String(preview.mime || '').startsWith('image/') ? (
+                <img src={preview.url} alt={preview.name} style={{ maxWidth: '100%', display: 'block', margin: '0 auto' }} />
+              ) : (String(preview.mime || '').includes('pdf') || String(preview.name || '').toLowerCase().endsWith('.pdf')) ? (
+                <iframe title={preview.name} src={preview.url} style={{ width: '100%', height: '70vh', border: 'none' }} />
+              ) : (
+                <p className="muted" style={{ padding: 16 }}>Preview not available for this file type. Use Open in new tab.</p>
+              )}
+            </div>
           </div>
         </div>
       )}

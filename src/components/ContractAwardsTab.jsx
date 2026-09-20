@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../lib/AuthContext';
 import { blankToNull } from '../lib/sanitize';
+import DocumentAttachments from './DocumentAttachments';
 
 const BLANK = {
   contractor_name: '', phone_number: '', address: '', description: '',
@@ -234,6 +235,14 @@ export default function ContractAwardsTab() {
               <div className="field"><label>Remarks</label>
                 <textarea rows={2} value={form.remarks} onChange={(e) => setForm({ ...form, remarks: e.target.value })} />
               </div>
+              {editing && (
+                <DocumentAttachments
+                  linkedTable="contract_awards"
+                  linkedRecordId={editing.id}
+                  estateId={editing.estate_id || form.estate_id}
+                  title="Contract documents"
+                />
+              )}
               {error && <div className="error-text">{error}</div>}
               <div className="modal-actions">
                 <button type="button" className="btn btn-outline" onClick={() => setShowModal(false)}>Cancel</button>

@@ -7,6 +7,7 @@ import { fetchCustomFields } from '../lib/customFields';
 import { blankToNull } from '../lib/sanitize';
 import ManageColumnsModal from './ManageColumnsModal';
 import BulkImportModal from './BulkImportModal';
+import InstallmentPaymentImport from './InstallmentPaymentImport';
 import { CustomFieldInputs, CustomFieldHeaders, CustomFieldCells } from './CustomFieldWidgets';
 
 const BLANK = {
@@ -61,6 +62,7 @@ export default function PaymentsTab() {
   const [showModal, setShowModal] = useState(false);
   const [showColumns, setShowColumns] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [showInstallmentImport, setShowInstallmentImport] = useState(false);
   const [editingRow, setEditingRow] = useState(null);
   const [form, setForm] = useState(BLANK);
   const [customData, setCustomData] = useState({});
@@ -170,6 +172,7 @@ export default function PaymentsTab() {
         <div className="flex wrap">
           <button className="btn btn-outline" onClick={() => setShowColumns(true)}>Manage Columns</button>
           <button className="btn btn-outline" onClick={() => setShowImport(true)}>Bulk Import from Excel</button>
+          <button className="btn btn-outline" onClick={() => setShowInstallmentImport(true)}>Import Installments (Payment 1, 2…)</button>
           {isAdmin && <button className="btn btn-danger" onClick={handleClearEstate}>Clear All Records for This Estate</button>}
           <button className="btn btn-primary" onClick={openNew}>+ New Payment</button>
         </div>
@@ -275,6 +278,14 @@ export default function PaymentsTab() {
       )}
 
       {showColumns && <ManageColumnsModal tableName="payments" onClose={() => setShowColumns(false)} onChanged={load} />}
+      {showInstallmentImport && (
+        <InstallmentPaymentImport
+          estateId={estateId}
+          profile={profile}
+          onClose={() => setShowInstallmentImport(false)}
+          onImported={load}
+        />
+      )}
       {showImport && (
         <BulkImportModal
           title={`Bulk Import Payments — ${estate?.name || ''}`}
