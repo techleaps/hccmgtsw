@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
+import { fetchAllFrom } from '../lib/fetchAll';
 import { useAuth } from '../lib/AuthContext';
 import { submitOrApplyUpdate, submitOrApplyDelete } from '../lib/recordActions';
 import { fetchCustomFields } from '../lib/customFields';
@@ -59,12 +60,9 @@ export default function OffersTab() {
     const { data: estateData } = await supabase.from('estates').select('*').eq('id', estateId).single();
     setEstate(estateData || null);
     setCustomFields(await fetchCustomFields('offers'));
-    const { data } = await supabase
-      .from('offers')
-      .select('*')
-      .eq('estate_id', estateId)
-      .eq('is_deleted', false)
-      .order('created_at', { ascending: true });
+    const data = await fetchAllFrom('offers', (q) =>
+      q.select('*').eq('estate_id', estateId).eq('is_deleted', false).order('created_at', { ascending: true })
+    );
     setRows(data || []);
     setLoading(false);
   }

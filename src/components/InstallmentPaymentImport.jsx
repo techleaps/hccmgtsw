@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { supabase } from '../lib/supabaseClient';
 
@@ -65,6 +65,21 @@ export default function InstallmentPaymentImport({ estateId, profile, onClose, o
   const [info, setInfo] = useState('');
   const [saving, setSaving] = useState(false);
   const [selected, setSelected] = useState([]);
+  const [propertyTypes, setPropertyTypes] = useState([]);
+  const [defaultPropertyType, setDefaultPropertyType] = useState('');
+
+  useEffect(() => {
+    if (!estateId) return;
+    supabase
+      .from('estate_property_types')
+      .select('property_type')
+      .eq('estate_id', estateId)
+      .then(({ data }) => {
+        const types = (data || []).map((r) => r.property_type).filter(Boolean);
+        setPropertyTypes(types);
+        if (types.length === 1) setDefaultPropertyType(types[0]);
+      });
+  }, [estateId]);
 
   function handleFile(e) {
     setError('');
@@ -101,6 +116,9 @@ export default function InstallmentPaymentImport({ estateId, profile, onClose, o
 
         const receiptCol = findCol(headers, [(h) => h.includes('receipt')]);
         const fileCol = findCol(headers, [(h) => h.includes('file no') || h === 'file']);
+        const propTypeCol = findCol(headers, [
+          (h) => h === 'property type' || h === 'type' || h === 'house type' || h.includes('property type'),
+        ]);
 
         // Pair Payment N with nearest Pmt Date column (prefer date column immediately before payment amount)
         const installmentPairs = [];
@@ -135,11 +153,13 @@ export default function InstallmentPaymentImport({ estateId, profile, onClose, o
             if (amt === null || amt === 0) return;
             const dateRaw = dateCol >= 0 ? row[dateCol] : null;
             const datePaid = parseDate(dateRaw);
+            const rowPropType = propTypeCol >= 0 ? String(row[propTypeCol] ?? '').trim() : '';
             expanded.push({
               subscriber_name: name,
               amount: amt,
               date_paid: datePaid,
               payment_type: 'property',
+              property_type: rowPropType || null, // filled with default on import if empty
               payment_reference: receipt || null,
               remarks: [
                 fileNo ? `File No: ${fileNo}` : null,
@@ -170,6 +190,10 @@ export default function InstallmentPaymentImport({ estateId, profile, onClose, o
   }, [rows, selected]);
 
   async function handleImport() {
+    if (!defaultPropertyType && !rows.some((r) => r.property_type)) {
+      setError('Select a property type for this import (or include a Property Type column in the sheet).');
+      return;
+    }
     const payload = rows
       .filter((_, i) => selected[i])
       .map((r) => ({
@@ -178,6 +202,7 @@ export default function InstallmentPaymentImport({ estateId, profile, onClose, o
         amount: r.amount,
         date_paid: r.date_paid,
         payment_type: 'property',
+        property_type: r.property_type || defaultPropertyType || null,
         payment_reference: r.payment_reference,
         remarks: r.remarks,
         created_by: profile.id,
@@ -208,6 +233,23 @@ export default function InstallmentPaymentImport({ estateId, profile, onClose, o
           Use the finance sheet with columns like <b>Payment 1</b>, <b>Pmt Date</b>, <b>Payment 2</b>, <b>Pmt Date</b>…
           Each non-empty installment becomes its own payment line on the subscriber profile.
         </p>
+        <div className="field">
+          <label>Property type for this import *</label>
+          <select
+            value={defaultPropertyType}
+            onChange={(e) => setDefaultPropertyType(e.target.value)}
+            required
+          >
+            <option value="">— Select property type —</option>
+            {propertyTypes.map((pt) => (
+              <option key={pt} value={pt}>{pt}</option>
+            ))}
+          </select>
+          <p className="muted" style={{ marginTop: 6 }}>
+            Required so Analysis can calculate % paid. If the sheet has a Property Type column, row values override this default.
+            Create types under the estate if the list is empty.
+          </p>
+        </div>
         <div className="field">
           <label>Excel / CSV file</label>
           <input type="file" accept=".xlsx,.xls,.csv" onChange={handleFile} />
