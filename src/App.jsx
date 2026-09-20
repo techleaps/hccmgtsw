@@ -25,6 +25,8 @@ import CustomTabView from './components/CustomTabView';
 import UsersAdmin from './components/UsersAdmin';
 import AuditLog from './components/AuditLog';
 import EditRequests from './components/EditRequests';
+import ConstructionTab from './components/ConstructionTab';
+import ContractAwardsTab from './components/ContractAwardsTab';
 
 export default function App() {
   const { session, profile, loading, signOut, isAdmin, isSupervisorPlus } = useAuth();
@@ -56,6 +58,8 @@ export default function App() {
           <NavLink to="/payments">Payments</NavLink>
           <NavLink to="/analysis">Payment Analysis</NavLink>
           <NavLink to="/coo">Change of Ownership</NavLink>
+          <NavLink to="/construction">Construction</NavLink>
+          <NavLink to="/contracts">Award of Contract</NavLink>
           <NavLink to="/approvals">Approvals / Expenditure</NavLink>
           <NavLink to="/refunds">Refunds</NavLink>
           <NavLink to="/documents">Documents</NavLink>
@@ -95,6 +99,9 @@ export default function App() {
             <Route path="/analysis" element={<AnalysisEstatesTab />} />
             <Route path="/analysis/:estateId" element={<Analysis />} />
             <Route path="/coo" element={<CooLogTab />} />
+            <Route path="/construction" element={<ConstructionTab />} />
+            <Route path="/construction/:estateId" element={<ConstructionTab />} />
+            <Route path="/contracts" element={<ContractAwardsTab />} />
             <Route path="/approvals" element={<ApprovalsTab />} />
             <Route path="/refunds" element={<RefundsTab />} />
             <Route path="/documents" element={<DocumentsTab />} />
