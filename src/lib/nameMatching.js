@@ -50,6 +50,16 @@ export function normalizePersonName(s) {
   return parts.map((w) => SPELLING_MAP[w] || w).join(' ').trim();
 }
 
+
+/** Remove trailing unit index: "John Doe 1" / "John Doe 2" → base "john doe" */
+export function stripUnitIndex(s) {
+  return String(s || '').replace(/\s+[0-9]+\s*$/, '').trim();
+}
+
+export function basePersonKey(s) {
+  return normalizePersonName(stripUnitIndex(s));
+}
+
 export function nameTokens(s) {
   return normalizePersonName(s).split(' ').filter((w) => w.length > 1);
 }
@@ -63,6 +73,10 @@ export function nameSimilarity(a, b) {
   const nb = normalizePersonName(b);
   if (!na || !nb) return 0;
   if (na === nb) return 1;
+  // Same person, multiple units of same type: "Name 1" vs "Name 2"
+  const ba = basePersonKey(a);
+  const bb = basePersonKey(b);
+  if (ba && bb && ba === bb) return 0.95;
   if (na.includes(nb) || nb.includes(na)) return 0.92;
 
   const ta = nameTokens(a);
