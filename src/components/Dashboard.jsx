@@ -361,6 +361,7 @@ export default function Dashboard() {
           <li><Link to="/construction">Construction</Link> — unit status by block (A/B/C/D)</li>
           <li><Link to="/contracts">Award of Contract</Link> — contractors, amounts, houses</li>
           <li><Link to="/coo">Change of Ownership</Link> — reallocation history</li>
+          <li><Link to="/duplicates">Duplicate Flags</Link> — review possible same-person name variants</li>
         </ol>
       </div>
     </div>

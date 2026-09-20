@@ -28,6 +28,7 @@ import EditRequests from './components/EditRequests';
 import ConstructionTab from './components/ConstructionTab';
 import ContractAwardsTab from './components/ContractAwardsTab';
 import SystemDangerZone from './components/SystemDangerZone';
+import DuplicatesTab from './components/DuplicatesTab';
 
 export default function App() {
   const { session, profile, loading, signOut, isAdmin, isSupervisorPlus, isSuperAdmin } = useAuth();
@@ -58,6 +59,7 @@ export default function App() {
           <NavLink to="/allocations">Allocations</NavLink>
           <NavLink to="/payments">Payments</NavLink>
           <NavLink to="/analysis">Payment Analysis</NavLink>
+          <NavLink to="/duplicates">Duplicate Flags</NavLink>
           <NavLink to="/coo">Change of Ownership</NavLink>
           <NavLink to="/construction">Construction</NavLink>
           <NavLink to="/contracts">Award of Contract</NavLink>
@@ -100,6 +102,7 @@ export default function App() {
             <Route path="/subscriber/:estateId/:name" element={<SubscriberProfile />} />
             <Route path="/analysis" element={<AnalysisEstatesTab />} />
             <Route path="/analysis/:estateId" element={<Analysis />} />
+            <Route path="/duplicates" element={<DuplicatesTab />} />
             <Route path="/coo" element={<CooLogTab />} />
             <Route path="/construction" element={<ConstructionTab />} />
             <Route path="/construction/:estateId" element={<ConstructionTab />} />

@@ -3,6 +3,7 @@ import { Link, useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../lib/AuthContext';
 import { blankToNull } from '../lib/sanitize';
+import { naturalHouseNoCompare } from '../lib/nameMatching';
 
 /** Default letter → property type (SVE / current naming) */
 export const BLOCK_TYPE_DEFAULTS = {
@@ -35,6 +36,9 @@ export default function ConstructionTab() {
   const [letterFilter, setLetterFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [search, setSearch] = useState('');
+  const [sortKey, setSortKey] = useState('house_no');
+  const [sortDir, setSortDir] = useState('asc');
+  const [clearing, setClearing] = useState(false);
 
   // Bulk create
   const [showBulk, setShowBulk] = useState(false);
@@ -75,12 +79,58 @@ export default function ConstructionTab() {
     setLoading(false);
   }
 
-  const filtered = useMemo(() => units.filter((u) => {
-    if (letterFilter && !(u.house_no || '').toUpperCase().startsWith(letterFilter.toUpperCase()) && (u.block_letter || '').toUpperCase() !== letterFilter.toUpperCase()) return false;
-    if (statusFilter && u.status_of_work !== statusFilter) return false;
-    const hay = `${u.house_no} ${u.property_name || ''} ${u.contractor_name || ''} ${u.remarks || ''}`.toLowerCase();
-    return hay.includes(search.toLowerCase());
-  }), [units, letterFilter, statusFilter, search]);
+  const filtered = useMemo(() => {
+    const list = units.filter((u) => {
+      if (letterFilter && !(u.house_no || '').toUpperCase().startsWith(letterFilter.toUpperCase()) && (u.block_letter || '').toUpperCase() !== letterFilter.toUpperCase()) return false;
+      if (statusFilter && u.status_of_work !== statusFilter) return false;
+      const hay = `${u.house_no} ${u.property_name || ''} ${u.contractor_name || ''} ${u.remarks || ''}`.toLowerCase();
+      return hay.includes(search.toLowerCase());
+    });
+    const dir = sortDir === 'asc' ? 1 : -1;
+    list.sort((a, b) => {
+      if (sortKey === 'house_no') {
+        // Prefer unit_number when available for true sequential order
+        const ua = a.unit_number, ub = b.unit_number;
+        if (ua != null && ub != null && ua !== ub) return (ua - ub) * dir;
+        return naturalHouseNoCompare(a.house_no, b.house_no) * dir;
+      }
+      if (sortKey === 'unit_number') {
+        return ((a.unit_number || 0) - (b.unit_number || 0)) * dir;
+      }
+      const va = String(a[sortKey] ?? '').toLowerCase();
+      const vb = String(b[sortKey] ?? '').toLowerCase();
+      return va.localeCompare(vb) * dir;
+    });
+    return list;
+  }, [units, letterFilter, statusFilter, search, sortKey, sortDir]);
+
+  function toggleSort(key) {
+    if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    else { setSortKey(key); setSortDir('asc'); }
+  }
+
+  function sortLabel(key, label) {
+    if (sortKey !== key) return label;
+    return `${label} ${sortDir === 'asc' ? '▲' : '▼'}`;
+  }
+
+  async function handleClearAllUnits() {
+    if (units.length === 0) { alert('No units to clear.'); return; }
+    const ok = confirm(`Remove all ${units.length} unit(s) for ${estate?.name}? You can re-create the range afterwards.`);
+    if (!ok) return;
+    const typed = prompt('Type DELETE to confirm clearing all construction units for this estate.');
+    if (typed !== 'DELETE') { alert('Cancelled.'); return; }
+    setClearing(true);
+    const { error } = await supabase
+      .from('construction_units')
+      .update({ is_deleted: true })
+      .eq('estate_id', estateId)
+      .eq('is_deleted', false);
+    setClearing(false);
+    if (error) { alert(error.message); return; }
+    alert('All units for this estate have been cleared.');
+    loadEstate();
+  }
 
   const byLetter = useMemo(() => {
     const m = {};
@@ -222,9 +272,19 @@ export default function ConstructionTab() {
         <div>
           <Link to="/construction" className="muted">&larr; All estates</Link>
           <h2>Construction — {estate?.name}</h2>
+          <p className="muted" style={{ margin: 0 }}>
+            These are the estate&apos;s unit / plot / allocation numbers (e.g. 420 plots of 600SQM).
+            When you allocate a unit to a subscriber, use the same number on the allocation record —
+            the system links construction, contractor and subscriber through that number.
+          </p>
         </div>
         <div className="flex wrap">
           <Link className="btn btn-outline" to="/contracts">Award of Contract</Link>
+          {isAdmin && (
+            <button className="btn btn-danger" onClick={handleClearAllUnits} disabled={clearing || units.length === 0}>
+              {clearing ? 'Clearing…' : 'Clear All Units'}
+            </button>
+          )}
           <button className="btn btn-primary" onClick={() => {
             setBulkPrefix('A');
             setBulkFrom(1);
@@ -274,14 +334,14 @@ export default function ConstructionTab() {
           <thead>
             <tr>
               <th>#</th>
-              <th>House No</th>
-              <th>Property type</th>
-              <th>Property name</th>
-              <th>Awarded</th>
-              <th>Contractor</th>
+              <th style={{ cursor: 'pointer' }} onClick={() => toggleSort('house_no')}>{sortLabel('house_no', 'Unit / Plot No')}</th>
+              <th style={{ cursor: 'pointer' }} onClick={() => toggleSort('property_type')}>{sortLabel('property_type', 'Property type')}</th>
+              <th style={{ cursor: 'pointer' }} onClick={() => toggleSort('property_name')}>{sortLabel('property_name', 'Property name')}</th>
+              <th style={{ cursor: 'pointer' }} onClick={() => toggleSort('awarded')}>{sortLabel('awarded', 'Awarded')}</th>
+              <th style={{ cursor: 'pointer' }} onClick={() => toggleSort('contractor_name')}>{sortLabel('contractor_name', 'Contractor')}</th>
               <th>Phone</th>
-              <th>Contract date</th>
-              <th>Status of work</th>
+              <th style={{ cursor: 'pointer' }} onClick={() => toggleSort('date_of_contract')}>{sortLabel('date_of_contract', 'Contract date')}</th>
+              <th style={{ cursor: 'pointer' }} onClick={() => toggleSort('status_of_work')}>{sortLabel('status_of_work', 'Status of work')}</th>
               <th>Remarks</th>
               <th>Actions</th>
             </tr>
