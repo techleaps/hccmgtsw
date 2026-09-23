@@ -1,6 +1,7 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { supabase } from '../lib/supabaseClient';
+import { recordFingerprint } from '../lib/importDedupe';
 
 /**
  * Import the wide finance sheet:
@@ -173,7 +174,40 @@ export default function InstallmentPaymentImport({ estateId, profile, onClose, o
         setRows(expanded);
         setSelected(expanded.map(() => true));
         setSelectedSheet(sheetName);
-        setInfo(`Sheet "${sheetName}": ${expanded.length} installment(s) from ${new Set(expanded.map((x) => x.subscriber_name)).size} subscriber(s).`);
+        setInfo(`Sheet "${sheetName}": ${expanded.length} installment(s) from ${new Set(expanded.map((x) => x.subscriber_name)).size} subscriber(s). Checking against existing payments…`);
+        // Skip rows already in DB (cumulative file support)
+        (async () => {
+          try {
+            const existingFp = new Set();
+            let from = 0;
+            const pageSize = 1000;
+            for (;;) {
+              const { data, error } = await supabase
+                .from('payments')
+                .select('subscriber_name, amount, date_paid, payment_type, property_type, payment_reference')
+                .eq('estate_id', estateId)
+                .eq('is_deleted', false)
+                .range(from, from + pageSize - 1);
+              if (error) break;
+              const batch = data || [];
+              batch.forEach((row) => existingFp.add(recordFingerprint('payments', row)));
+              if (batch.length < pageSize) break;
+              from += pageSize;
+            }
+            const sel = expanded.map((r) => !existingFp.has(recordFingerprint('payments', {
+              ...r,
+              property_type: r.property_type || defaultPropertyType || null,
+            })));
+            const newCount = sel.filter(Boolean).length;
+            const skipCount = sel.length - newCount;
+            setSelected(sel);
+            setInfo(
+              `Sheet "${sheetName}": ${expanded.length} line(s), ${newCount} new to import, ${skipCount} already in system (unchecked).`
+            );
+          } catch (e) {
+            console.warn(e);
+          }
+        })();
     } catch (err) {
       console.error(err);
       setError(err.message || 'Failed to read sheet');

@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { supabase } from '../lib/supabaseClient';
 import { nameSimilarity, normalizePersonName } from '../lib/nameMatching';
+import { recordFingerprint } from '../lib/importDedupe';
 
 const IGNORE = '__ignore__';
 
@@ -236,14 +237,12 @@ export default function BulkImportModal({ title, tableName, fieldDefs, estates =
 
   async function goToPreview() {
     const baseInclude = allRecords.map((r) => !looksLikeJunkRow(r, requiredKey, knownEstateNames));
-    setIncluded(baseInclude);
-    setStep('preview'); // dup scan follows
-
-    // Flag possible duplicates (in-file + against DB) — allow import, show warning only
-    const nameKey = fieldDefs.find((f) => f.key === 'subscriber_name' || f.key === 'previous_owner' || f.key === 'new_owner')?.key
-      || requiredKey;
     const flags = allRecords.map(() => '');
-    // Within file
+    const nameKey = fieldDefs.find((f) =>
+      ['subscriber_name', 'previous_owner', 'new_owner'].includes(f.key)
+    )?.key || requiredKey;
+
+    // Within-file exact name repeats
     const seen = new Map();
     allRecords.forEach((r, i) => {
       const n = String(r[nameKey] || '').trim().toLowerCase();
@@ -253,40 +252,61 @@ export default function BulkImportModal({ title, tableName, fieldDefs, estates =
         flags[seen.get(n)] = flags[seen.get(n)] || 'Same name again in this file';
       } else seen.set(n, i);
     });
-    // Fuzzy pairs within file (order/title)
+
+    // Load existing rows for this estate and skip fingerprints already in DB
+    let existingFp = new Set();
+    try {
+      if (estateId && ['payments', 'offers', 'allocation_records', 'refunds', 'ownership_changes'].includes(tableName)) {
+        let q = supabase.from(tableName).select('*');
+        if (tableName === 'ownership_changes') {
+          q = q.eq('estate_id', estateId);
+        } else {
+          q = q.eq('estate_id', estateId).eq('is_deleted', false);
+        }
+        // page through
+        const pageSize = 1000;
+        let from = 0;
+        for (;;) {
+          const { data, error } = await q.range(from, from + pageSize - 1);
+          if (error) break;
+          const batch = data || [];
+          batch.forEach((row) => existingFp.add(recordFingerprint(tableName, row)));
+          if (batch.length < pageSize) break;
+          from += pageSize;
+        }
+      }
+    } catch (err) {
+      console.warn('existing load', err);
+    }
+
+    const include = baseInclude.map((ok, i) => {
+      if (!ok) return false;
+      const fp = recordFingerprint(tableName, allRecords[i]);
+      if (existingFp.has(fp)) {
+        flags[i] = 'Already in system — will skip';
+        return false; // auto-uncheck
+      }
+      return true;
+    });
+
+    // Fuzzy note (still imported unless exact fp match)
     for (let i = 0; i < allRecords.length; i += 1) {
+      if (flags[i]?.includes('Already')) continue;
       const a = String(allRecords[i][nameKey] || '').trim();
       if (!a) continue;
-      for (let j = i + 1; j < Math.min(allRecords.length, i + 80); j += 1) {
+      for (let j = i + 1; j < Math.min(allRecords.length, i + 60); j += 1) {
         const b = String(allRecords[j][nameKey] || '').trim();
         if (!b) continue;
         if (nameSimilarity(a, b) >= 0.9 && a.toLowerCase() !== b.toLowerCase()) {
-          flags[i] = flags[i] || `Similar to row ${j + 1}`;
-          flags[j] = flags[j] || `Similar to row ${i + 1}`;
+          if (!flags[i]) flags[i] = `Similar name to row ${j + 1}`;
+          if (!flags[j]) flags[j] = `Similar name to row ${i + 1}`;
         }
       }
     }
-    // Against existing DB (same estate) when table has subscriber_name
-    try {
-      if (estateId && (tableName === 'payments' || tableName === 'offers' || tableName === 'allocation_records' || tableName === 'refunds')) {
-        const { data: existing } = await supabase
-          .from(tableName)
-          .select('subscriber_name')
-          .eq('estate_id', estateId)
-          .eq('is_deleted', false)
-          .limit(5000);
-        const existNames = (existing || []).map((x) => x.subscriber_name).filter(Boolean);
-        allRecords.forEach((r, i) => {
-          const n = String(r.subscriber_name || r[nameKey] || '').trim();
-          if (!n) return;
-          const hit = existNames.find((e) => e.toLowerCase() === n.toLowerCase() || nameSimilarity(e, n) >= 0.92);
-          if (hit) flags[i] = flags[i] || `Matches existing: ${hit}`;
-        });
-      }
-    } catch (err) {
-      console.warn('dup scan', err);
-    }
+
     setDupFlags(flags);
+    setIncluded(include);
+    setStep('preview');
   }
 
   function toggleRow(i) {
@@ -513,6 +533,10 @@ export default function BulkImportModal({ title, tableName, fieldDefs, estates =
             </p>
             <div className="modal-actions">
               <button type="button" className="btn btn-outline" onClick={() => setStep('mapping')}>Back</button>
+              <p className="muted" style={{ flex: 1, margin: 0 }}>
+                Rows marked <b>Already in system</b> are unchecked and will not be imported again
+                (safe for cumulative Excel files from colleagues). Re-check a row only if you intend to duplicate it.
+              </p>
               <button type="button" className="btn btn-primary" onClick={handleImport}>
                 Import {importableCount} Rows
               </button>
