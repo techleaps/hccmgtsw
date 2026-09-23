@@ -53,27 +53,27 @@ export default function App() {
           <h1>NAFILHCC<br />Admin System</h1>
         </div>
         <nav>
-          <NavLink to="/" end>Dashboard</NavLink>
-          <NavLink to="/estates">Estates</NavLink>
-          <NavLink to="/offers">Offers</NavLink>
-          <NavLink to="/allocations">Allocations</NavLink>
-          <NavLink to="/payments">Payments</NavLink>
-          <NavLink to="/analysis">Payment Analysis</NavLink>
-          <NavLink to="/duplicates">Duplicate Flags</NavLink>
-          <NavLink to="/coo">Change of Ownership</NavLink>
-          <NavLink to="/construction">Construction</NavLink>
-          <NavLink to="/contracts">Award of Contract</NavLink>
-          <NavLink to="/approvals">Approvals / Expenditure</NavLink>
-          <NavLink to="/refunds">Refunds</NavLink>
-          <NavLink to="/documents">Documents</NavLink>
+          <NavLink to="/" end><span className="nav-icon">⌂</span> Dashboard</NavLink>
+          <NavLink to="/estates"><span className="nav-icon">🏘</span> Estates</NavLink>
+          <NavLink to="/offers"><span className="nav-icon">✉</span> Offers</NavLink>
+          <NavLink to="/allocations"><span className="nav-icon">🏠</span> Allocations</NavLink>
+          <NavLink to="/payments"><span className="nav-icon">₦</span> Payments</NavLink>
+          <NavLink to="/analysis"><span className="nav-icon">📊</span> Payment Analysis</NavLink>
+          <NavLink to="/duplicates"><span className="nav-icon">🔗</span> Duplicate Flags</NavLink>
+          <NavLink to="/coo"><span className="nav-icon">🔄</span> Change of Ownership</NavLink>
+          <NavLink to="/construction"><span className="nav-icon">🔨</span> Construction</NavLink>
+          <NavLink to="/contracts"><span className="nav-icon">📋</span> Award of Contract</NavLink>
+          <NavLink to="/approvals"><span className="nav-icon">✅</span> Approvals / Expenditure</NavLink>
+          <NavLink to="/refunds"><span className="nav-icon">↩</span> Refunds</NavLink>
+          <NavLink to="/documents"><span className="nav-icon">📁</span> Documents</NavLink>
           {customTabs.map((t) => (
-            <NavLink key={t.id} to={`/tab/${t.tab_key}`}>{t.label}</NavLink>
+            <NavLink key={t.id} to={`/tab/${t.tab_key}`}><span className="nav-icon">📌</span> {t.label}</NavLink>
           ))}
-          <NavLink to="/edit-requests">Edit/Delete Requests</NavLink>
-          {isAdmin && <NavLink to="/custom-tabs">Custom Tabs</NavLink>}
-          {isAdmin && <NavLink to="/users">Users &amp; Access</NavLink>}
-          {isSuperAdmin && <NavLink to="/system-clear">Clear All Data</NavLink>}
-          {isSupervisorPlus && <NavLink to="/audit-log">Audit Log</NavLink>}
+          <NavLink to="/edit-requests"><span className="nav-icon">✏️</span> Edit/Delete Requests</NavLink>
+          {isAdmin && <NavLink to="/custom-tabs"><span className="nav-icon">⚙</span> Custom Tabs</NavLink>}
+          {isAdmin && <NavLink to="/users"><span className="nav-icon">👤</span> Users &amp; Access</NavLink>}
+          {isSuperAdmin && <NavLink to="/system-clear"><span className="nav-icon">🗑</span> Clear All Data</NavLink>}
+          {isSupervisorPlus && <NavLink to="/audit-log"><span className="nav-icon">📜</span> Audit Log</NavLink>}
         </nav>
       </aside>
 

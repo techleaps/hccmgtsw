@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { supabase } from '../lib/supabaseClient';
+import { nameSimilarity, normalizePersonName } from '../lib/nameMatching';
 
 const IGNORE = '__ignore__';
 
@@ -114,7 +115,8 @@ export default function BulkImportModal({ title, tableName, fieldDefs, estates =
   const [rowsRaw, setRowsRaw] = useState([]);      // for numbers/dates/checkboxes
   const [rowsDisplay, setRowsDisplay] = useState([]); // formatted text, for text fields (avoids "100%" -> 1 bugs)
   const [mapping, setMapping] = useState([]);
-  const [included, setIncluded] = useState([]); // boolean per row, whether to import it
+  const [included, setIncluded] = useState([]);
+  const [dupFlags, setDupFlags] = useState([]); // per-row note: '' | 'in-file' | 'in-db'
   const [error, setError] = useState('');
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [result, setResult] = useState(null);
@@ -232,9 +234,59 @@ export default function BulkImportModal({ title, tableName, fieldDefs, estates =
     [rowsRaw, rowsDisplay, headers, mapping, fieldDefs, defaultPropertyType, transformRecord]
   );
 
-  function goToPreview() {
-    setIncluded(allRecords.map((r) => !looksLikeJunkRow(r, requiredKey, knownEstateNames)));
-    setStep('preview');
+  async function goToPreview() {
+    const baseInclude = allRecords.map((r) => !looksLikeJunkRow(r, requiredKey, knownEstateNames));
+    setIncluded(baseInclude);
+    setStep('preview'); // dup scan follows
+
+    // Flag possible duplicates (in-file + against DB) — allow import, show warning only
+    const nameKey = fieldDefs.find((f) => f.key === 'subscriber_name' || f.key === 'previous_owner' || f.key === 'new_owner')?.key
+      || requiredKey;
+    const flags = allRecords.map(() => '');
+    // Within file
+    const seen = new Map();
+    allRecords.forEach((r, i) => {
+      const n = String(r[nameKey] || '').trim().toLowerCase();
+      if (!n) return;
+      if (seen.has(n)) {
+        flags[i] = flags[i] || 'Same name again in this file';
+        flags[seen.get(n)] = flags[seen.get(n)] || 'Same name again in this file';
+      } else seen.set(n, i);
+    });
+    // Fuzzy pairs within file (order/title)
+    for (let i = 0; i < allRecords.length; i += 1) {
+      const a = String(allRecords[i][nameKey] || '').trim();
+      if (!a) continue;
+      for (let j = i + 1; j < Math.min(allRecords.length, i + 80); j += 1) {
+        const b = String(allRecords[j][nameKey] || '').trim();
+        if (!b) continue;
+        if (nameSimilarity(a, b) >= 0.9 && a.toLowerCase() !== b.toLowerCase()) {
+          flags[i] = flags[i] || `Similar to row ${j + 1}`;
+          flags[j] = flags[j] || `Similar to row ${i + 1}`;
+        }
+      }
+    }
+    // Against existing DB (same estate) when table has subscriber_name
+    try {
+      if (estateId && (tableName === 'payments' || tableName === 'offers' || tableName === 'allocation_records' || tableName === 'refunds')) {
+        const { data: existing } = await supabase
+          .from(tableName)
+          .select('subscriber_name')
+          .eq('estate_id', estateId)
+          .eq('is_deleted', false)
+          .limit(5000);
+        const existNames = (existing || []).map((x) => x.subscriber_name).filter(Boolean);
+        allRecords.forEach((r, i) => {
+          const n = String(r.subscriber_name || r[nameKey] || '').trim();
+          if (!n) return;
+          const hit = existNames.find((e) => e.toLowerCase() === n.toLowerCase() || nameSimilarity(e, n) >= 0.92);
+          if (hit) flags[i] = flags[i] || `Matches existing: ${hit}`;
+        });
+      }
+    } catch (err) {
+      console.warn('dup scan', err);
+    }
+    setDupFlags(flags);
   }
 
   function toggleRow(i) {
@@ -446,6 +498,7 @@ export default function BulkImportModal({ title, tableName, fieldDefs, estates =
                   {allRecords.map((r, i) => (
                     <tr key={i} style={included[i] ? {} : { opacity: 0.4 }}>
                       <td><input type="checkbox" checked={!!included[i]} onChange={() => toggleRow(i)} /></td>
+                      <td>{dupFlags[i] ? <span className="dup-flag">{dupFlags[i]}</span> : <span className="muted">—</span>}</td>
                       {visibleFields.map((f) => (
                         <td key={f.key}>{f.type === 'checkbox' ? (r[f.key] ? '✓' : '') : (r[f.key] ?? '')}</td>
                       ))}

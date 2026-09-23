@@ -1,13 +1,132 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
+import { useAuth } from '../lib/AuthContext';
+import BulkImportModal from './BulkImportModal';
+
+/** Maps your COO Excel columns to ownership_changes */
+export const COO_FIELD_DEFS = [
+  {
+    key: 'previous_owner',
+    label: 'Initial Name / Previous Owner',
+    type: 'text',
+    required: true,
+    synonyms: ['initial name', 'previous owner', 'old name', 'from', 'former owner', 'seller'],
+  },
+  {
+    key: 'new_owner',
+    label: 'New Name / New Owner',
+    type: 'text',
+    required: true,
+    synonyms: ['new name', 'new owner', 'to', 'buyer', 'current owner'],
+  },
+  {
+    key: 'date_changed',
+    label: 'Date Processed',
+    type: 'date',
+    synonyms: ['date processed', 'date', 'date changed', 'processed', 'coo date'],
+  },
+  {
+    key: 'property_type',
+    label: 'Property Type',
+    type: 'text',
+    synonyms: ['property type', 'type', 'house type'],
+  },
+  {
+    key: 'status',
+    label: 'Status',
+    type: 'text',
+    synonyms: ['status', 'coo status', 'state'],
+  },
+  {
+    key: 'new_allocation_no',
+    label: 'Allocation / House No',
+    type: 'text',
+    synonyms: ['allocation', 'allocation no', 'house no', 'house number', 'unit'],
+  },
+  {
+    key: 'previous_phone',
+    label: 'Initial Phone',
+    type: 'text',
+    synonyms: ['phone number', 'initial phone', 'old phone'],
+  },
+  {
+    key: 'previous_email',
+    label: 'Initial Email',
+    type: 'text',
+    synonyms: ['email address', 'initial email', 'old email'],
+  },
+  {
+    key: 'previous_address',
+    label: 'Initial Address',
+    type: 'text',
+    synonyms: ['initial address', 'old address', 'address'],
+  },
+  {
+    key: 'new_phone',
+    label: 'New Phone',
+    type: 'text',
+    synonyms: ['new phone', 'new phone number'],
+  },
+  {
+    key: 'new_email',
+    label: 'New Email',
+    type: 'text',
+    synonyms: ['new email', 'new email address'],
+  },
+  {
+    key: 'new_address',
+    label: 'New Address',
+    type: 'text',
+    synonyms: ['new address'],
+  },
+  {
+    key: 'remarks',
+    label: 'Remarks',
+    type: 'text',
+    synonyms: ['remarks', 'remark', 'notes', 'note'],
+  },
+  {
+    key: 'comments',
+    label: 'Comments / MD note',
+    type: 'text',
+    synonyms: ['comments', 'comment', "md's first comment", 'md comment'],
+  },
+];
+
+function transformCooRecord(r) {
+  const bits = [];
+  if (r.previous_address) bits.push(`Prev address: ${r.previous_address}`);
+  if (r.previous_phone) bits.push(`Prev phone: ${r.previous_phone}`);
+  if (r.previous_email) bits.push(`Prev email: ${r.previous_email}`);
+  if (r.new_address) bits.push(`New address: ${r.new_address}`);
+  if (r.new_phone) bits.push(`New phone: ${r.new_phone}`);
+  if (r.new_email) bits.push(`New email: ${r.new_email}`);
+  if (r.status) bits.push(`Status: ${r.status}`);
+  const extra = bits.join(' · ');
+  const comments = [r.comments, extra].filter(Boolean).join(' | ') || null;
+  return {
+    previous_owner: String(r.previous_owner || '').trim(),
+    new_owner: String(r.new_owner || '').trim(),
+    date_changed: r.date_changed || null,
+    property_type: r.property_type || null,
+    status: r.status || null,
+    new_allocation_no: r.new_allocation_no || null,
+    remarks: r.remarks || null,
+    comments,
+    reason: r.status ? `COO (${r.status})` : 'Change of ownership',
+  };
+}
 
 export default function CooLogTab() {
+  const { profile } = useAuth();
   const [rows, setRows] = useState([]);
   const [estates, setEstates] = useState([]);
   const [estateFilter, setEstateFilter] = useState('');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [importStep, setImportStep] = useState(null); // null | 'estate' | 'file'
+  const [importEstateId, setImportEstateId] = useState('');
 
   useEffect(() => { load(); }, []);
 
@@ -36,7 +155,7 @@ export default function CooLogTab() {
   const filtered = useMemo(() => {
     return rows.filter((r) => {
       if (estateFilter && estateIdOf(r) !== estateFilter) return false;
-      const hay = `${r.previous_owner} ${r.new_owner}`.toLowerCase();
+      const hay = `${r.previous_owner} ${r.new_owner} ${r.property_type || ''}`.toLowerCase();
       return hay.includes(search.toLowerCase());
     });
   }, [rows, estateFilter, search]);
@@ -49,16 +168,27 @@ export default function CooLogTab() {
   return (
     <div>
       <div className="page-title">
-        <h2>Change of Ownership — History</h2>
-        <div className="flex">
-          <Link className="btn btn-outline" to="/offers">Offers Register</Link>
-          <Link className="btn btn-primary" to="/allocations">Allocations Register</Link>
+        <div>
+          <h2>Change of Ownership — History</h2>
+          <p className="muted" style={{ margin: 0 }}>
+            Import from Excel (one sheet per estate) or record COO from Allocations / Offers.
+          </p>
+        </div>
+        <div className="flex wrap">
+          <Link className="btn btn-outline" to="/offers">Offers</Link>
+          <Link className="btn btn-outline" to="/allocations">Allocations</Link>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => {
+              setImportEstateId(estateFilter || (estates[0]?.id || ''));
+              setImportStep('estate');
+            }}
+          >
+            Bulk Import COO
+          </button>
         </div>
       </div>
-      <p className="muted">
-        To record a new change of ownership, open the subscriber&apos;s row in the Allocations (or Offers)
-        register and click <b>Record COO</b>. Capture the COO fee and optional payment evidence there.
-      </p>
 
       <div className="grid cols-3">
         <div className="stat-card">
@@ -100,10 +230,11 @@ export default function CooLogTab() {
                 <th>Estate</th>
                 <th>Previous Owner</th>
                 <th>New Owner</th>
-                <th>House / PON</th>
+                <th>Property type</th>
+                <th>House / Allocation</th>
+                <th>Status</th>
                 <th className="right">COO Fee (₦)</th>
-                <th>Reason</th>
-                <th>Comments</th>
+                <th>Remarks / Comments</th>
               </tr>
             </thead>
             <tbody>
@@ -119,16 +250,17 @@ export default function CooLogTab() {
                       </Link>
                     ) : r.new_owner}
                   </td>
+                  <td>{r.property_type || '—'}</td>
                   <td>{r.new_pon || r.new_allocation_no || '—'}</td>
+                  <td>{r.status || '—'}</td>
                   <td className="right">{Number(r.amount_paid || 0).toLocaleString()}</td>
-                  <td>{r.reason || '—'}</td>
-                  <td>{r.comments || '—'}</td>
+                  <td>{[r.remarks, r.comments].filter(Boolean).join(' · ') || '—'}</td>
                 </tr>
               ))}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="empty-state">
-                    No ownership changes recorded yet. Use <b>Record COO</b> on an allocation row (e.g. Kuje estate).
+                  <td colSpan={9} className="empty-state">
+                    No ownership changes yet. Use <b>Bulk Import COO</b> or <b>Record COO</b> on an allocation.
                   </td>
                 </tr>
               )}
@@ -136,6 +268,55 @@ export default function CooLogTab() {
           </table>
         )}
       </div>
+
+      {importStep === 'estate' && (
+        <div className="modal-overlay" onClick={() => setImportStep(null)}>
+          <div className="modal" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+            <h3>Which estate is this COO sheet for?</h3>
+            <p className="muted">
+              Workbooks often have one sheet per estate. Select the estate, then choose the matching sheet in the file picker.
+            </p>
+            <div className="field">
+              <label>Estate *</label>
+              <select value={importEstateId} onChange={(e) => setImportEstateId(e.target.value)}>
+                <option value="">— Select —</option>
+                {estates.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+              </select>
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="btn btn-outline" onClick={() => setImportStep(null)}>Cancel</button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={!importEstateId}
+                onClick={() => setImportStep('file')}
+              >
+                Continue to file…
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {importStep === 'file' && importEstateId && (
+        <BulkImportModal
+          title={`Bulk Import COO — ${estates.find((e) => e.id === importEstateId)?.name || ''}`}
+          tableName="ownership_changes"
+          fieldDefs={COO_FIELD_DEFS}
+          estates={estates}
+          presetEstateId={importEstateId}
+          profile={profile}
+          onClose={() => { setImportStep(null); setImportEstateId(''); }}
+          onImported={() => { setImportStep(null); setImportEstateId(''); load(); }}
+          transformRecord={(r) => ({
+            ...transformCooRecord(r),
+            estate_id: importEstateId,
+            created_by: profile?.id,
+            amount_paid: Number(r.amount_paid) || 0,
+          })}
+        />
+      )}
     </div>
   );
 }
+

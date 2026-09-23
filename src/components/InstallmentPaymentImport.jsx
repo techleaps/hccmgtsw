@@ -67,6 +67,10 @@ export default function InstallmentPaymentImport({ estateId, profile, onClose, o
   const [selected, setSelected] = useState([]);
   const [propertyTypes, setPropertyTypes] = useState([]);
   const [defaultPropertyType, setDefaultPropertyType] = useState('');
+  const [workbook, setWorkbook] = useState(null);
+  const [sheetNames, setSheetNames] = useState([]);
+  const [selectedSheet, setSelectedSheet] = useState('');
+  const [fileName, setFileName] = useState('');
 
   useEffect(() => {
     if (!estateId) return;
@@ -81,17 +85,9 @@ export default function InstallmentPaymentImport({ estateId, profile, onClose, o
       });
   }, [estateId]);
 
-  function handleFile(e) {
-    setError('');
-    setInfo('');
-    setRows([]);
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      try {
-        const wb = XLSX.read(evt.target.result, { type: 'array', cellDates: true });
-        const sheet = wb.Sheets[wb.SheetNames[0]];
+  function runParse(wb, sheetName) {
+    try {
+        const sheet = wb.Sheets[sheetName];
         const grid = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: true });
         if (!grid.length) { setError('Empty sheet.'); return; }
 
@@ -176,7 +172,39 @@ export default function InstallmentPaymentImport({ estateId, profile, onClose, o
         }
         setRows(expanded);
         setSelected(expanded.map(() => true));
-        setInfo(`${expanded.length} installment payment(s) from ${new Set(expanded.map((x) => x.subscriber_name)).size} subscriber(s). Review then import.`);
+        setSelectedSheet(sheetName);
+        setInfo(`Sheet "${sheetName}": ${expanded.length} installment(s) from ${new Set(expanded.map((x) => x.subscriber_name)).size} subscriber(s).`);
+    } catch (err) {
+      console.error(err);
+      setError(err.message || 'Failed to read sheet');
+    }
+  }
+
+  function handleFile(e) {
+    setError('');
+    setInfo('');
+    setRows([]);
+    setWorkbook(null);
+    setSheetNames([]);
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const wb = XLSX.read(evt.target.result, { type: 'array', cellDates: true });
+        if (!wb.SheetNames.length) {
+          setError('No sheets in file.');
+          return;
+        }
+        setWorkbook(wb);
+        setSheetNames(wb.SheetNames);
+        setSelectedSheet(wb.SheetNames[0]);
+        if (wb.SheetNames.length === 1) {
+          runParse(wb, wb.SheetNames[0]);
+        } else {
+          setInfo(`File has ${wb.SheetNames.length} sheets. Choose which sheet to import (e.g. old vs new rate, or estate).`);
+        }
       } catch (err) {
         console.error(err);
         setError(err.message || 'Failed to read file');
@@ -254,6 +282,22 @@ export default function InstallmentPaymentImport({ estateId, profile, onClose, o
           <label>Excel / CSV file</label>
           <input type="file" accept=".xlsx,.xls,.csv" onChange={handleFile} />
         </div>
+        {sheetNames.length > 1 && workbook && (
+          <div className="field">
+            <label>Sheet to import ({sheetNames.length} sheets in {fileName || 'file'})</label>
+            <select
+              value={selectedSheet}
+              onChange={(e) => {
+                setSelectedSheet(e.target.value);
+                runParse(workbook, e.target.value);
+              }}
+            >
+              {sheetNames.map((n) => (
+                <option key={n} value={n}>{n}</option>
+              ))}
+            </select>
+          </div>
+        )}
         {info && <p className="muted">{info} · Selected total ₦{totalSelected.toLocaleString()}</p>}
         {error && <div className="error-text">{error}</div>}
 

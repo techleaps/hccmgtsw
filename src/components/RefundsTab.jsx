@@ -24,7 +24,7 @@ export const REFUND_FIELD_DEFS = [
     type: 'text',
     required: true,
     synonyms: [
-      'who was refunded', 'who was refunded name', 'subscriber', 'subscriber name',
+      'who was refunded', 'to whom refunded', 'to whom', 'who was refunded name', 'subscriber', 'subscriber name',
       'names', 'name', 'beneficiary', 'payee', 'refunded to',
     ],
   },
@@ -39,7 +39,7 @@ export const REFUND_FIELD_DEFS = [
     label: 'Date of Refund',
     type: 'date',
     synonyms: [
-      'date of refund', 'refund date', 'date of approval', 'date approved',
+      'date of refund', 'refund date', 'date of approval', 'date approved', 'date of refund',
       'date', 'approval date', 'paid on', 'date paid',
     ],
   },
