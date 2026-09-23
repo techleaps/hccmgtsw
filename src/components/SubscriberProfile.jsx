@@ -216,21 +216,66 @@ export default function SubscriberProfile() {
 
   if (loading) return <p className="muted">Loading…</p>;
 
-  const propertyTypes = [...new Set([
-    ...offers.map((o) => o.property_type).filter(Boolean),
-    ...allocations.map((a) => a.property_type).filter(Boolean),
-    ...payments.map((p) => p.property_type).filter(Boolean),
-  ])];
+  // Units = each subscription (prefer allocation rows)
+  const units = (() => {
+    const fromAlloc = (allocations || []).map((a) => ({
+      property_type: a.property_type || null,
+      house_no: a.house_no || null,
+      source: 'allocation',
+    }));
+    if (fromAlloc.length) return fromAlloc;
+    const fromOffer = (offers || [])
+      .filter((o) => o.property_type)
+      .map((o) => ({ property_type: o.property_type, house_no: null, source: 'offer' }));
+    if (fromOffer.length) return fromOffer;
+    const types = [...new Set((payments || []).map((p) => p.property_type).filter(Boolean))];
+    return types.map((pt) => ({ property_type: pt, house_no: null, source: 'payment' }));
+  })();
 
+  const propertyTypes = [...new Set(units.map((u) => u.property_type).filter(Boolean))];
   const phone = offers.find((o) => o.phone_number)?.phone_number
     || allocations.find((a) => a.phone_number)?.phone_number;
   const email = offers.find((o) => o.email_address)?.email_address;
+  const estateName = estate?.name || 'this estate';
 
-  const { expected, paid } = allocatePaymentSummary(payments, offers, feeConfig, propertyTypes);
+  function financeForType(pt) {
+    const singleUnit = units.length <= 1;
+    const typePays = (payments || []).filter((p) => {
+      const ppt = (p.property_type || '').trim();
+      if (singleUnit) return true;
+      if (!ppt || !pt) return false;
+      const a = ppt.toLowerCase();
+      const b = String(pt).toLowerCase();
+      return a === b || a.includes(b) || b.includes(a);
+    });
+    const typeOffers = singleUnit
+      ? offers
+      : (offers || []).filter((o) => {
+          const ot = (o.property_type || '').trim();
+          if (!ot || !pt) return false;
+          return ot.toLowerCase() === String(pt).toLowerCase();
+        });
+    return allocatePaymentSummary(typePays, typeOffers, feeConfig, pt ? [pt] : []);
+  }
 
-  const propertyPct = expected.property > 0
-    ? Math.round((paid.property / expected.property) * 100)
-    : null;
+  const perUnitFinance = units.map((u) => {
+    const fin = financeForType(u.property_type);
+    const propPct = fin.expected.property > 0
+      ? Math.round((fin.paid.property / fin.expected.property) * 100)
+      : null;
+    return { ...u, ...fin, propPct };
+  });
+
+  const untaggedPayments = units.length > 1
+    ? (payments || []).filter((p) => !(p.property_type || '').trim())
+    : [];
+  const untaggedTotal = untaggedPayments.reduce((s, p) => s + Number(p.amount || 0), 0);
+
+  const primaryFin = perUnitFinance[0] || allocatePaymentSummary(payments, offers, feeConfig, propertyTypes);
+  const { expected, paid } = primaryFin;
+  const propertyPct = primaryFin.propPct != null
+    ? primaryFin.propPct
+    : (expected.property > 0 ? Math.round((paid.property / expected.property) * 100) : null);
   const tdpPct = expected.legal_tdp > 0
     ? Math.round((paid.legal_tdp / expected.legal_tdp) * 100)
     : null;
@@ -240,20 +285,30 @@ export default function SubscriberProfile() {
 
   const totalRefunded = refunds.reduce((s, r) => s + Number(r.amount_approved || 0), 0);
   const totalCooFees = cooRows.reduce((s, r) => s + Number(r.amount_paid || 0), 0);
-  const totalPaidAll = (paid.property || 0) + (paid.infrastructure || 0) + (paid.legal_tdp || 0) + (paid.other || 0);
-  const totalExpectedAll = (expected.property || 0) + (expected.infrastructure || 0) + (expected.legal_tdp || 0);
+  const totalPaidAll = payments.reduce((s, p) => s + Number(p.amount || 0), 0)
+    + offers.reduce((s, o) => s + Number(o.amount_paid || 0), 0);
+  const totalExpectedAll = perUnitFinance.reduce(
+    (s, u) => s + (u.expected.property || 0) + (u.expected.infrastructure || 0) + (u.expected.legal_tdp || 0),
+    0,
+  );
 
-  // Compact headline for the right-hand summary card
   const summaryBits = [];
-  if (propertyPct !== null) summaryBits.push(`Prop ${propertyPct}%`);
-  else if (paid.property > 0) summaryBits.push(`Prop ₦${paid.property.toLocaleString()}`);
-  if (paid.legal_tdp > 0 || expected.legal_tdp > 0) {
-    summaryBits.push(tdpPct !== null ? `TDP ${tdpPct}%` : `TDP ₦${paid.legal_tdp.toLocaleString()}`);
+  if (units.length > 1) {
+    summaryBits.push(`${units.length} units`);
+    perUnitFinance.slice(0, 3).forEach((u) => {
+      if (u.propPct != null) summaryBits.push(`${(u.property_type || 'Unit').split(' ').slice(0, 2).join(' ')} ${u.propPct}%`);
+    });
+  } else {
+    if (propertyPct !== null) summaryBits.push(`Prop ${propertyPct}%`);
+    else if (paid.property > 0) summaryBits.push(`Prop ₦${paid.property.toLocaleString()}`);
+    if (paid.legal_tdp > 0 || expected.legal_tdp > 0) {
+      summaryBits.push(tdpPct !== null ? `TDP ${tdpPct}%` : `TDP ₦${paid.legal_tdp.toLocaleString()}`);
+    }
+    if (paid.infrastructure > 0 || expected.infrastructure > 0) {
+      summaryBits.push(infraPct !== null ? `Infra ${infraPct}%` : `Infra ₦${paid.infrastructure.toLocaleString()}`);
+    }
   }
-  if (paid.infrastructure > 0 || expected.infrastructure > 0) {
-    summaryBits.push(infraPct !== null ? `Infra ${infraPct}%` : `Infra ₦${paid.infrastructure.toLocaleString()}`);
-  }
-  if (paid.other > 0) summaryBits.push(`Other ₦${paid.other.toLocaleString()}`);
+  if (paid.other > 0 && units.length <= 1) summaryBits.push(`Other ₦${paid.other.toLocaleString()}`);
   if (totalRefunded > 0) summaryBits.push(`Refund ₦${totalRefunded.toLocaleString()}`);
   if (totalCooFees > 0) summaryBits.push(`COO ₦${totalCooFees.toLocaleString()}`);
 
@@ -320,8 +375,8 @@ export default function SubscriberProfile() {
             { label: 'Offer printed', ok: offers.some((o) => o.offer_printed) },
             { label: 'Offer collected', ok: offers.some((o) => o.offer_collected) },
             { label: 'Payments recorded', ok: payments.length > 0 || paid.property > 0 },
-            { label: 'Property fully paid', ok: expected.property > 0 && paid.property >= expected.property },
-            { label: 'TDP settled', ok: expected.legal_tdp <= 0 || paid.legal_tdp >= expected.legal_tdp },
+            { label: 'Property fully paid', ok: perUnitFinance.length > 0 && perUnitFinance.every((u) => u.expected.property > 0 && u.paid.property >= u.expected.property) },
+            { label: 'TDP settled', ok: perUnitFinance.every((u) => u.expected.legal_tdp <= 0 || u.paid.legal_tdp >= u.expected.legal_tdp) },
             { label: 'Allocated (FA)', ok: allocations.length > 0 },
             { label: 'FA collected', ok: allocations.some((a) => a.collected) },
             { label: 'Construction linked', ok: constructionUnits.length > 0 },
@@ -339,69 +394,112 @@ export default function SubscriberProfile() {
 
       <div className="card">
         <h3>Complete Financial Commitment</h3>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Item</th>
-                <th className="right">Expected</th>
-                <th className="right">Paid / Done</th>
-                <th className="right">Balance</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>Property</td>
-                <td className="right">{expected.property > 0 ? expected.property.toLocaleString() : <span className="muted">Not set</span>}</td>
-                <td className="right">{paid.property.toLocaleString()}</td>
-                <td className="right">{formatBalance(expected.property, paid.property)}</td>
-                <td>
-                  {formatPct(expected.property, paid.property)}
-                  {expected.property > 0 && paid.property >= expected.property && (
-                    <span className="tag approved" style={{ marginLeft: 6 }}>Complete</span>
-                  )}
-                  {expected.property > 0 && paid.property > expected.property && (
-                    <span className="tag approved" style={{ marginLeft: 6 }}>Overpaid</span>
-                  )}
-                </td>
-              </tr>
-              <tr>
-                <td>Infrastructure</td>
-                <td className="right">{expected.infrastructure > 0 ? expected.infrastructure.toLocaleString() : <span className="muted">Not set</span>}</td>
-                <td className="right">{paid.infrastructure.toLocaleString()}</td>
-                <td className="right">{formatBalance(expected.infrastructure, paid.infrastructure)}</td>
-                <td>{formatPct(expected.infrastructure, paid.infrastructure)}</td>
-              </tr>
-              <tr>
-                <td>Legal / TDP</td>
-                <td className="right">{expected.legal_tdp > 0 ? expected.legal_tdp.toLocaleString() : <span className="muted">Not set</span>}</td>
-                <td className="right">{paid.legal_tdp.toLocaleString()}</td>
-                <td className="right">{formatBalance(expected.legal_tdp, paid.legal_tdp)}</td>
-                <td>
-                  {formatPct(expected.legal_tdp, paid.legal_tdp)}
-                  {paid.legal_tdp > 0 && expected.legal_tdp > 0 && paid.legal_tdp >= expected.legal_tdp && (
-                    <span className="tag approved" style={{ marginLeft: 6 }}>TDP paid</span>
-                  )}
-                  {paid.legal_tdp === 0 && expected.legal_tdp > 0 && (
-                    <span className="tag PO" style={{ marginLeft: 6 }}>TDP outstanding</span>
-                  )}
-                </td>
-              </tr>
-              {paid.other > 0 && (
-                <tr>
-                  <td>Other payments</td>
-                  <td className="right">—</td>
-                  <td className="right">{paid.other.toLocaleString()}</td>
-                  <td className="right">—</td>
-                  <td><span className="tag">Recorded</span></td>
-                </tr>
+        <p className="muted" style={{ marginTop: 0 }}>
+          Each property type is shown separately so totals are not mixed across units.
+          {units.length > 1 && untaggedTotal > 0 && (
+            <span> Untagged payments (no property type on the payment row): <b>₦{untaggedTotal.toLocaleString()}</b> — assign a type on those payment lines for accurate %.</span>
+          )}
+        </p>
+        {perUnitFinance.length === 0 && (
+          <p className="muted">No property type on file for this subscriber yet.</p>
+        )}
+        {perUnitFinance.map((u, ui) => (
+          <div key={ui} style={{ marginBottom: 20 }}>
+            <h4 style={{ margin: '12px 0 8px', fontSize: 15 }}>
+              {u.property_type || 'Unspecified'}
+              {u.house_no ? ` · House ${u.house_no}` : ''}
+              <span className="muted" style={{ fontWeight: 500 }}> — at {estateName}</span>
+              {u.propPct != null && (
+                <span className="tag approved" style={{ marginLeft: 8 }}>Prop {u.propPct}%</span>
               )}
-              <tr>
-                <td><b>Total payments in</b></td>
-                <td className="right">{totalExpectedAll > 0 ? totalExpectedAll.toLocaleString() : '—'}</td>
-                <td className="right"><b>{totalPaidAll.toLocaleString()}</b></td>
-                <td className="right">{totalExpectedAll > 0 ? (totalExpectedAll - totalPaidAll).toLocaleString() : '—'}</td>
+            </h4>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Item</th>
+                    <th className="right">Expected</th>
+                    <th className="right">Paid / Done</th>
+                    <th className="right">Balance</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Property</td>
+                    <td className="right">{u.expected.property > 0 ? u.expected.property.toLocaleString() : <span className="muted">Not set</span>}</td>
+                    <td className="right">{u.paid.property.toLocaleString()}</td>
+                    <td className="right">{formatBalance(u.expected.property, u.paid.property)}</td>
+                    <td>
+                      {formatPct(u.expected.property, u.paid.property)}
+                      {u.expected.property > 0 && u.paid.property >= u.expected.property && (
+                        <span className="tag approved" style={{ marginLeft: 6 }}>Complete</span>
+                      )}
+                      {u.expected.property > 0 && u.paid.property > u.expected.property && (
+                        <span className="tag approved" style={{ marginLeft: 6 }}>Overpaid</span>
+                      )}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Infrastructure</td>
+                    <td className="right">{u.expected.infrastructure > 0 ? u.expected.infrastructure.toLocaleString() : <span className="muted">Not set</span>}</td>
+                    <td className="right">{u.paid.infrastructure.toLocaleString()}</td>
+                    <td className="right">{formatBalance(u.expected.infrastructure, u.paid.infrastructure)}</td>
+                    <td>{formatPct(u.expected.infrastructure, u.paid.infrastructure)}</td>
+                  </tr>
+                  <tr>
+                    <td>Legal / TDP</td>
+                    <td className="right">{u.expected.legal_tdp > 0 ? u.expected.legal_tdp.toLocaleString() : <span className="muted">Not set</span>}</td>
+                    <td className="right">{u.paid.legal_tdp.toLocaleString()}</td>
+                    <td className="right">{formatBalance(u.expected.legal_tdp, u.paid.legal_tdp)}</td>
+                    <td>
+                      {formatPct(u.expected.legal_tdp, u.paid.legal_tdp)}
+                      {u.expected.legal_tdp > 0 && u.paid.legal_tdp >= u.expected.legal_tdp && (
+                        <span className="tag approved" style={{ marginLeft: 6 }}>TDP paid</span>
+                      )}
+                    </td>
+                  </tr>
+                  {(u.paid.other > 0) && (
+                    <tr>
+                      <td>Other</td>
+                      <td className="right">—</td>
+                      <td className="right">{u.paid.other.toLocaleString()}</td>
+                      <td className="right">—</td>
+                      <td>—</td>
+                    </tr>
+                  )}
+                  <tr style={{ fontWeight: 600, background: '#f8fafc' }}>
+                    <td>Subtotal this unit</td>
+                    <td className="right">
+                      {(u.expected.property + u.expected.infrastructure + u.expected.legal_tdp).toLocaleString()}
+                    </td>
+                    <td className="right">
+                      {(u.paid.property + u.paid.infrastructure + u.paid.legal_tdp + u.paid.other).toLocaleString()}
+                    </td>
+                    <td className="right">
+                      {formatBalance(
+                        u.expected.property + u.expected.infrastructure + u.expected.legal_tdp,
+                        u.paid.property + u.paid.infrastructure + u.paid.legal_tdp,
+                      )}
+                    </td>
+                    <td />
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            {(u.notes || []).length > 0 && (
+              <p className="muted" style={{ fontSize: 12 }}>{u.notes.join(' · ')}</p>
+            )}
+          </div>
+        ))}
+        <div className="table-wrap" style={{ marginTop: 8 }}>
+          <table>
+            <tbody>
+              <tr style={{ fontWeight: 700 }}>
+                <td>All payments recorded (this profile)</td>
+                <td className="right">—</td>
+                <td className="right">{totalPaidAll.toLocaleString()}</td>
+                <td className="right">—</td>
                 <td />
               </tr>
               <tr>
@@ -410,8 +508,8 @@ export default function SubscriberProfile() {
                 <td className="right">{totalRefunded > 0 ? totalRefunded.toLocaleString() : '0'}</td>
                 <td className="right">—</td>
                 <td>
-                  {refunds.length > 0
-                    ? <span className="tag rejected">{refunds.length} refund(s)</span>
+                  {totalRefunded > 0
+                    ? <span className="tag PO">{refunds.length} refund(s)</span>
                     : <span className="muted">None</span>}
                 </td>
               </tr>
@@ -430,6 +528,7 @@ export default function SubscriberProfile() {
           </table>
         </div>
       </div>
+
 
       <div className="grid cols-2">
         <div className="card">
