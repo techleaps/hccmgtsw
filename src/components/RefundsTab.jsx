@@ -115,6 +115,10 @@ export default function RefundsTab() {
   const [showModal, setShowModal] = useState(false);
   const [showColumns, setShowColumns] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [sortKey, setSortKey] = useState('date_of_approval');
+  const [sortDir, setSortDir] = useState('desc');
+  const [bulkPropertyType, setBulkPropertyType] = useState('');
+  const [bulkBusy, setBulkBusy] = useState(false);
   const [editingRow, setEditingRow] = useState(null);
   const [form, setForm] = useState(BLANK);
   const [customData, setCustomData] = useState({});
@@ -143,12 +147,50 @@ export default function RefundsTab() {
     return [...set].sort();
   }, [rows]);
 
-  const filtered = useMemo(() => rows.filter((r) => {
-    if (estateFilter && r.estate_id !== estateFilter) return false;
-    if (propertyTypeFilter && (r.property_type || '') !== propertyTypeFilter) return false;
-    const hay = `${r.subscriber_name || ''} ${r.reason || ''} ${r.remarks || ''} ${r.property_type || ''}`.toLowerCase();
-    return hay.includes(search.toLowerCase());
-  }), [rows, estateFilter, propertyTypeFilter, search]);
+  const filtered = useMemo(() => {
+    const list = rows.filter((r) => {
+      if (estateFilter && r.estate_id !== estateFilter) return false;
+      if (propertyTypeFilter === '__unspecified__') {
+        if ((r.property_type || '').trim()) return false;
+      } else if (propertyTypeFilter && (r.property_type || '') !== propertyTypeFilter) return false;
+      const hay = `${r.subscriber_name || ''} ${r.reason || ''} ${r.remarks || ''} ${r.property_type || ''}`.toLowerCase();
+      return hay.includes(search.toLowerCase());
+    });
+    const dir = sortDir === 'asc' ? 1 : -1;
+    list.sort((a, b) => {
+      if (sortKey === 'date_of_approval') {
+        const da = a.date_of_approval || '';
+        const db = b.date_of_approval || '';
+        if (da !== db) return da < db ? -dir : dir;
+        return 0;
+      }
+      if (sortKey === 'amount_approved' || sortKey === 'amount_requested') {
+        return (Number(a[sortKey] || 0) - Number(b[sortKey] || 0)) * dir;
+      }
+      if (sortKey === 'serial_no') {
+        return (Number(a.serial_no || 0) - Number(b.serial_no || 0)) * dir;
+      }
+      if (sortKey === 'estate') {
+        const ea = (a.estates?.name || '').toLowerCase();
+        const eb = (b.estates?.name || '').toLowerCase();
+        return ea.localeCompare(eb) * dir;
+      }
+      const va = String(a[sortKey] ?? '').toLowerCase();
+      const vb = String(b[sortKey] ?? '').toLowerCase();
+      return va.localeCompare(vb) * dir;
+    });
+    return list;
+  }, [rows, estateFilter, propertyTypeFilter, search, sortKey, sortDir]);
+
+  function toggleSort(key) {
+    if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    else { setSortKey(key); setSortDir(key === 'date_of_approval' || key === 'amount_approved' ? 'desc' : 'asc'); }
+  }
+
+  function sortLabel(key, label) {
+    if (sortKey !== key) return label;
+    return `${label} ${sortDir === 'asc' ? '▲' : '▼'}`;
+  }
 
   // Overall totals (respecting current filters)
   const totals = useMemo(() => {
@@ -252,6 +294,53 @@ export default function RefundsTab() {
     load();
   }
 
+  /** Set property type on all currently filtered rows (e.g. after import without a type). */
+  async function handleBulkSetPropertyType() {
+    const pt = bulkPropertyType.trim();
+    if (!pt) { alert('Enter or choose a property type first (e.g. 2 Bedroom).'); return; }
+    if (!filtered.length) { alert('No rows match the current filters.'); return; }
+    const ok = confirm(
+      `Set property type to "${pt}" on ${filtered.length} refund row(s) currently shown (filters applied)?`
+    );
+    if (!ok) return;
+    setBulkBusy(true);
+    const ids = filtered.map((r) => r.id);
+    // Update in chunks
+    let updated = 0;
+    let errMsg = '';
+    for (let i = 0; i < ids.length; i += 200) {
+      const chunk = ids.slice(i, i + 200);
+      const { data, error } = await supabase
+        .from('refunds')
+        .update({ property_type: pt })
+        .in('id', chunk)
+        .select('id');
+      if (error) { errMsg = error.message; break; }
+      updated += (data || []).length;
+    }
+    setBulkBusy(false);
+    if (errMsg) alert(`Updated ${updated} row(s). Error: ${errMsg}`);
+    else alert(`Updated property type on ${updated} refund row(s).`);
+    load();
+  }
+
+  async function handleClearAllRefunds() {
+    const scope = estateFilter
+      ? `all refunds for the selected estate filter (${filtered.length} visible — will clear ALL non-deleted refunds for that estate in the database)`
+      : 'ALL refunds in the system';
+    if (!confirm(`Clear ${scope}? This soft-deletes records so they leave the list.`)) return;
+    const typed = prompt('Type DELETE REFUNDS to confirm:');
+    if (typed !== 'DELETE REFUNDS') { alert('Cancelled.'); return; }
+    setBulkBusy(true);
+    let q = supabase.from('refunds').update({ is_deleted: true }).eq('is_deleted', false);
+    if (estateFilter) q = q.eq('estate_id', estateFilter);
+    const { error } = await q;
+    setBulkBusy(false);
+    if (error) { alert(error.message); return; }
+    alert('Refunds cleared.');
+    load();
+  }
+
   // Import transform: if amount_requested missing, copy amount_approved
   function transformImportRecord(r) {
     const amountApproved = Number(r.amount_approved) || 0;
@@ -273,6 +362,9 @@ export default function RefundsTab() {
         <div className="flex">
           <button className="btn btn-outline" onClick={() => setShowColumns(true)}>Manage Columns</button>
           <button className="btn btn-outline" onClick={() => setShowImport(true)}>Bulk Import</button>
+          <button className="btn btn-danger" onClick={handleClearAllRefunds} disabled={bulkBusy}>
+            {bulkBusy ? 'Working…' : 'Clear All Refunds'}
+          </button>
           <button className="btn btn-primary" onClick={openNew}>+ New Refund Entry</button>
         </div>
       </div>
@@ -369,6 +461,7 @@ export default function RefundsTab() {
             <label>Filter by Property Type</label>
             <select value={propertyTypeFilter} onChange={(e) => setPropertyTypeFilter(e.target.value)}>
               <option value="">All Types</option>
+              <option value="__unspecified__">Unspecified only (—)</option>
               {propertyTypes.map((pt) => <option key={pt} value={pt}>{pt}</option>)}
             </select>
           </div>
@@ -381,6 +474,31 @@ export default function RefundsTab() {
             />
           </div>
         </div>
+        <div className="flex wrap" style={{ marginTop: 12, alignItems: 'flex-end', gap: 10, borderTop: '1px solid #e2e8f0', paddingTop: 12 }}>
+          <div style={{ minWidth: 200 }}>
+            <label>Fix property type on shown rows</label>
+            <input
+              list="refund-property-types"
+              value={bulkPropertyType}
+              onChange={(e) => setBulkPropertyType(e.target.value)}
+              placeholder="e.g. 2 Bedroom / 2BR — Old Rate"
+            />
+            <datalist id="refund-property-types">
+              {propertyTypes.map((pt) => <option key={pt} value={pt} />)}
+            </datalist>
+          </div>
+          <button
+            type="button"
+            className="btn btn-outline"
+            disabled={bulkBusy || !filtered.length}
+            onClick={handleBulkSetPropertyType}
+          >
+            {bulkBusy ? 'Updating…' : `Apply to ${filtered.length} shown row(s)`}
+          </button>
+          <p className="muted" style={{ margin: 0, flex: 1 }}>
+            Use this if you imported without a property type. Filter to the estate (and Unspecified if needed), type the correct type, then Apply.
+          </p>
+        </div>
       </div>
 
       <div className="table-wrap">
@@ -388,23 +506,23 @@ export default function RefundsTab() {
           <table>
             <thead>
               <tr>
-                <th>S/N</th>
-                <th>Subscriber</th>
-                <th>Estate</th>
-                <th>Property Type</th>
-                <th>Reason</th>
-                <th className="right">Requested (₦)</th>
-                <th className="right">Refunded (₦)</th>
-                <th>Date of Refund</th>
+                <th style={{ cursor: 'pointer' }} onClick={() => toggleSort('serial_no')}>{sortLabel('serial_no', 'S/N')}</th>
+                <th style={{ cursor: 'pointer' }} onClick={() => toggleSort('subscriber_name')}>{sortLabel('subscriber_name', 'Subscriber')}</th>
+                <th style={{ cursor: 'pointer' }} onClick={() => toggleSort('estate')}>{sortLabel('estate', 'Estate')}</th>
+                <th style={{ cursor: 'pointer' }} onClick={() => toggleSort('property_type')}>{sortLabel('property_type', 'Property Type')}</th>
+                <th style={{ cursor: 'pointer' }} onClick={() => toggleSort('reason')}>{sortLabel('reason', 'Reason')}</th>
+                <th className="right" style={{ cursor: 'pointer' }} onClick={() => toggleSort('amount_requested')}>{sortLabel('amount_requested', 'Requested (₦)')}</th>
+                <th className="right" style={{ cursor: 'pointer' }} onClick={() => toggleSort('amount_approved')}>{sortLabel('amount_approved', 'Refunded (₦)')}</th>
+                <th style={{ cursor: 'pointer' }} onClick={() => toggleSort('date_of_approval')}>{sortLabel('date_of_approval', 'Date of Refund')}</th>
                 <th>Remarks</th>
                 <CustomFieldHeaders fields={customFields} />
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map((r) => (
+              {filtered.map((r, i) => (
                 <tr key={r.id}>
-                  <td>{r.serial_no}</td>
+                  <td>{r.serial_no ?? i + 1}</td>
                   <td>{r.subscriber_name}</td>
                   <td>{r.estates?.name || '—'}</td>
                   <td>{r.property_type || '—'}</td>
@@ -430,6 +548,16 @@ export default function RefundsTab() {
                 </tr>
               )}
             </tbody>
+            {filtered.length > 0 && (
+              <tfoot>
+                <tr style={{ fontWeight: 700, background: '#f1f5f9' }}>
+                  <td colSpan={5}>TOTAL ({totals.count} refund{totals.count === 1 ? '' : 's'})</td>
+                  <td className="right">{totals.requested.toLocaleString()}</td>
+                  <td className="right">{totals.approved.toLocaleString()}</td>
+                  <td colSpan={2 + customFields.length + 1}></td>
+                </tr>
+              </tfoot>
+            )}
           </table>
         )}
       </div>
