@@ -292,3 +292,60 @@ export function allocatePaymentSummary(payments, offers, feeConfig, propertyType
 
   return { expected, paid: display, paidRaw, notes };
 }
+
+
+/**
+ * Flag likely double / repeated payments for investigation.
+ * - exactDupes: same person + amount + date (+ type) more than once
+ * - repeatedSameAmount: same person paid the exact same amount 3+ times (possible re-entry)
+ */
+export function findLikelyDoublePayments(payments) {
+  const exactMap = new Map();
+  const amountCountByPerson = new Map();
+
+  (payments || []).forEach((p) => {
+    const name = String(p.subscriber_name || '').trim();
+    if (!name) return;
+    const amt = Number(p.amount || 0);
+    const date = String(p.date_paid || '').slice(0, 10);
+    const ptype = String(p.payment_type || 'property').toLowerCase();
+    const exactKey = `${name.toLowerCase()}|${amt.toFixed(2)}|${date}|${ptype}`;
+    if (!exactMap.has(exactKey)) {
+      exactMap.set(exactKey, { name, amount: amt, date_paid: date || '—', payment_type: ptype, count: 0, ids: [] });
+    }
+    const ex = exactMap.get(exactKey);
+    ex.count += 1;
+    if (p.id) ex.ids.push(p.id);
+
+    const personKey = name.toLowerCase();
+    if (!amountCountByPerson.has(personKey)) amountCountByPerson.set(personKey, { name, byAmount: new Map() });
+    const person = amountCountByPerson.get(personKey);
+    const ak = amt.toFixed(2);
+    person.byAmount.set(ak, (person.byAmount.get(ak) || 0) + 1);
+  });
+
+  const exactDupes = [...exactMap.values()]
+    .filter((x) => x.count >= 2 && x.amount > 0)
+    .sort((a, b) => b.amount * b.count - a.amount * a.count);
+
+  const repeatedSameAmount = [];
+  amountCountByPerson.forEach((person) => {
+    person.byAmount.forEach((cnt, ak) => {
+      if (cnt >= 3 && Number(ak) > 0) {
+        repeatedSameAmount.push({
+          name: person.name,
+          amount: Number(ak),
+          times: cnt,
+        });
+      }
+    });
+  });
+  repeatedSameAmount.sort((a, b) => b.times - a.times);
+
+  return {
+    exactDupes,
+    repeatedSameAmount,
+    totalExactDuapeRows: exactDupes.reduce((s, x) => s + x.count, 0),
+    flagCount: exactDupes.length + repeatedSameAmount.length,
+  };
+}

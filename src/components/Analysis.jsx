@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { fetchAllFrom } from '../lib/fetchAll';
-import { buildSubscribers, costByTypeMap, bucketSubscribers, breakdownByPropertyType } from '../lib/paymentAnalysis';
+import { buildSubscribers, costByTypeMap, bucketSubscribers, breakdownByPropertyType, findLikelyDoublePayments } from '../lib/paymentAnalysis';
 
 export default function Analysis() {
   const { estateId } = useParams();
@@ -33,7 +33,7 @@ export default function Analysis() {
         q.select('subscriber_name, property_type').eq('estate_id', estateId).eq('is_deleted', false)
       ),
       fetchAllFrom('payments', (q) =>
-        q.select('subscriber_name, property_type, payment_type, amount').eq('estate_id', estateId).eq('is_deleted', false)
+        q.select('id, subscriber_name, property_type, payment_type, amount, date_paid, payment_reference').eq('estate_id', estateId).eq('is_deleted', false)
       ),
     ]);
     setOffers(offersAll);
@@ -60,6 +60,8 @@ export default function Analysis() {
     () => breakdownByPropertyType(allSubscribers, costByType, types),
     [allSubscribers, costByType, types]
   );
+
+  const doublePay = useMemo(() => findLikelyDoublePayments(payments), [payments]);
 
   if (loading) return <p className="muted">Loading…</p>;
 
@@ -88,6 +90,74 @@ export default function Analysis() {
           </p>
         )}
       </div>
+
+      {doublePay.flagCount > 0 && (
+        <div className="card" style={{ borderLeft: '4px solid #dc2626', background: '#fef2f2' }}>
+          <h3 style={{ marginTop: 0, color: '#991b1b' }}>⚠ Possible double / repeated payments</h3>
+          <p className="muted">
+            Review these before relying on totals. Exact matches mean the same person, amount and date
+            appear more than once (often from re-importing a cumulative file). Repeated same amount
+            (3+ times) may also need a check.
+          </p>
+          <div className="grid cols-2">
+            <div>
+              <b>Exact duplicates</b> ({doublePay.exactDupes.length} groups, {doublePay.totalExactDuapeRows} payment lines)
+              <div className="table-wrap" style={{ maxHeight: 280, overflow: 'auto', marginTop: 8 }}>
+                <table>
+                  <thead>
+                    <tr><th>Subscriber</th><th className="right">Amount</th><th>Date</th><th>Times</th><th></th></tr>
+                  </thead>
+                  <tbody>
+                    {doublePay.exactDupes.slice(0, 50).map((d, i) => (
+                      <tr key={i}>
+                        <td>{d.name}</td>
+                        <td className="right">{d.amount.toLocaleString()}</td>
+                        <td>{d.date_paid}</td>
+                        <td><span className="tag rejected">{d.count}×</span></td>
+                        <td>
+                          <Link className="btn btn-outline btn-sm" to={`/subscriber/${estateId}/${encodeURIComponent(d.name)}`}>
+                            Profile
+                          </Link>
+                        </td>
+                      </tr>
+                    ))}
+                    {doublePay.exactDupes.length === 0 && (
+                      <tr><td colSpan={5} className="muted">None</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div>
+              <b>Same amount 3+ times</b> ({doublePay.repeatedSameAmount.length})
+              <div className="table-wrap" style={{ maxHeight: 280, overflow: 'auto', marginTop: 8 }}>
+                <table>
+                  <thead>
+                    <tr><th>Subscriber</th><th className="right">Amount</th><th>Times</th><th></th></tr>
+                  </thead>
+                  <tbody>
+                    {doublePay.repeatedSameAmount.slice(0, 50).map((d, i) => (
+                      <tr key={i}>
+                        <td>{d.name}</td>
+                        <td className="right">{d.amount.toLocaleString()}</td>
+                        <td><span className="tag PO">{d.times}×</span></td>
+                        <td>
+                          <Link className="btn btn-outline btn-sm" to={`/subscriber/${estateId}/${encodeURIComponent(d.name)}`}>
+                            Profile
+                          </Link>
+                        </td>
+                      </tr>
+                    ))}
+                    {doublePay.repeatedSameAmount.length === 0 && (
+                      <tr><td colSpan={4} className="muted">None</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="table-wrap">
         <table>
