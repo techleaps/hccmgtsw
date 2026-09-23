@@ -71,14 +71,29 @@ function excelDateToISO(value) {
   }
   if (typeof value === 'string' && value.trim()) {
     const s = value.trim();
-    // DD/MM/YYYY or DD-MM-YYYY (common in Nigerian spreadsheets)
+    // DD/MM/YYYY or DD-MM-YYYY
     const m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
     if (m) {
       let [, dd, mm, yyyy] = m;
       if (yyyy.length === 2) yyyy = Number(yyyy) > 50 ? `19${yyyy}` : `20${yyyy}`;
       const iso = `${yyyy.padStart(4, '0')}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`;
-      const d = new Date(iso);
-      if (!isNaN(d)) return iso;
+      if (!isNaN(new Date(iso))) return iso;
+    }
+    // 06-Feb-25 / 06-Feb-2025 / 15 Jan 2026 (common COO sheets)
+    const months = {
+      jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
+      jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, nov: 11, dec: 12,
+    };
+    const m2 = s.match(/^(\d{1,2})[\/\-\s]+([A-Za-z]{3,9})[\/\-\s]+(\d{2,4})$/);
+    if (m2) {
+      const dd = m2[1].padStart(2, '0');
+      const mon = months[m2[2].toLowerCase().slice(0, 3)] || months[m2[2].toLowerCase()];
+      let yyyy = m2[3];
+      if (yyyy.length === 2) yyyy = Number(yyyy) > 50 ? `19${yyyy}` : `20${yyyy}`;
+      if (mon) {
+        const iso = `${yyyy.padStart(4, '0')}-${String(mon).padStart(2, '0')}-${dd}`;
+        if (!isNaN(new Date(iso))) return iso;
+      }
     }
     const d = new Date(s);
     if (!isNaN(d)) return d.toISOString().slice(0, 10);

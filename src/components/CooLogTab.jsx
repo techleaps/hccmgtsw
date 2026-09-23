@@ -24,7 +24,7 @@ export const COO_FIELD_DEFS = [
     key: 'date_changed',
     label: 'Date Processed',
     type: 'date',
-    synonyms: ['date processed', 'date', 'date changed', 'processed', 'coo date'],
+    synonyms: ['date processed', 'date changed', 'processed date', 'coo date', 'date of coo'],
   },
   {
     key: 'property_type',
@@ -94,6 +94,25 @@ export const COO_FIELD_DEFS = [
   },
 ];
 
+function ensureIsoDate(v) {
+  if (!v) return null;
+  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v)) return v.slice(0, 10);
+  // last-resort parse for values that slipped through
+  const s = String(v).trim();
+  const months = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12 };
+  const m2 = s.match(/^(\d{1,2})[\/\-\s]+([A-Za-z]{3,9})[\/\-\s]+(\d{2,4})$/);
+  if (m2) {
+    const dd = m2[1].padStart(2, '0');
+    const mon = months[m2[2].toLowerCase().slice(0, 3)];
+    let y = m2[3];
+    if (y.length === 2) y = Number(y) > 50 ? `19${y}` : `20${y}`;
+    if (mon) return `${y.padStart(4, '0')}-${String(mon).padStart(2, '0')}-${dd}`;
+  }
+  const d = new Date(s);
+  if (!isNaN(d)) return d.toISOString().slice(0, 10);
+  return null;
+}
+
 function transformCooRecord(r) {
   const bits = [];
   if (r.previous_address) bits.push(`Prev address: ${r.previous_address}`);
@@ -105,10 +124,13 @@ function transformCooRecord(r) {
   if (r.status) bits.push(`Status: ${r.status}`);
   const extra = bits.join(' · ');
   const comments = [r.comments, extra].filter(Boolean).join(' | ') || null;
+  let dateChanged = ensureIsoDate(r.date_changed);
+  // DB requires date_changed NOT NULL — use today only if sheet left it blank
+  if (!dateChanged) dateChanged = new Date().toISOString().slice(0, 10);
   return {
     previous_owner: String(r.previous_owner || '').trim(),
     new_owner: String(r.new_owner || '').trim(),
-    date_changed: r.date_changed || null,
+    date_changed: dateChanged,
     property_type: r.property_type || null,
     status: r.status || null,
     new_allocation_no: r.new_allocation_no || null,
