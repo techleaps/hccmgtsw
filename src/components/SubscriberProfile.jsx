@@ -138,10 +138,7 @@ export default function SubscriberProfile() {
     let offers = filterName(offersRes.data);
     let allocs = filterName(allocRes.data);
     let pays = filterName(paymentRows);
-    // If fuzzy filter removed everything but DB returned rows, keep DB rows (exact-ish contains)
-    if (offers.length === 0 && (offersRes.data || []).length) offers = offersRes.data;
-    if (allocs.length === 0 && (allocRes.data || []).length) allocs = allocRes.data;
-    if (pays.length === 0 && paymentRows.length) pays = paymentRows;
+    // Do NOT fall back to all DB rows — that mixed other subscribers into this profile.
 
     // Deduplicate identical allocation/offer lines (same house + name)
     offers = dedupeByKey(offers, (r) => `${(r.subscriber_name || '').toLowerCase()}|${r.form_no || ''}|${r.property_type || ''}`);
@@ -216,20 +213,23 @@ export default function SubscriberProfile() {
 
   if (loading) return <p className="muted">Loading…</p>;
 
-  // Units = each subscription (prefer allocation rows)
+  // Units from real allocations only (house + type). Avoid inventing multi-units from payment tags.
   const units = (() => {
     const fromAlloc = (allocations || []).map((a) => ({
       property_type: a.property_type || null,
       house_no: a.house_no || null,
+      infrastructure_waived: !!a.infrastructure_waived,
+      allocation_id: a.id,
       source: 'allocation',
     }));
     if (fromAlloc.length) return fromAlloc;
-    const fromOffer = (offers || [])
-      .filter((o) => o.property_type)
-      .map((o) => ({ property_type: o.property_type, house_no: null, source: 'offer' }));
-    if (fromOffer.length) return fromOffer;
-    const types = [...new Set((payments || []).map((p) => p.property_type).filter(Boolean))];
-    return types.map((pt) => ({ property_type: pt, house_no: null, source: 'payment' }));
+    // No allocation: single logical unit from best-known type (do not explode into every payment type)
+    const pt =
+      (offers.find((o) => o.property_type)?.property_type)
+      || (payments.find((p) => p.property_type)?.property_type)
+      || null;
+    const waived = offers.some((o) => o.infrastructure_waived);
+    return [{ property_type: pt, house_no: null, infrastructure_waived: waived, allocation_id: null, source: 'inferred' }];
   })();
 
   const propertyTypes = [...new Set(units.map((u) => u.property_type).filter(Boolean))];
@@ -238,28 +238,37 @@ export default function SubscriberProfile() {
   const email = offers.find((o) => o.email_address)?.email_address;
   const estateName = estate?.name || 'this estate';
 
-  function financeForType(pt) {
-    const singleUnit = units.length <= 1;
+  const anyInfraWaived = units.some((u) => u.infrastructure_waived)
+    || offers.some((o) => o.infrastructure_waived);
+
+  function financeForType(pt, infraWaived) {
+    const multi = units.length > 1;
     const typePays = (payments || []).filter((p) => {
       const ppt = (p.property_type || '').trim();
-      if (singleUnit) return true;
+      if (!multi) return true;
       if (!ppt || !pt) return false;
       const a = ppt.toLowerCase();
       const b = String(pt).toLowerCase();
       return a === b || a.includes(b) || b.includes(a);
     });
-    const typeOffers = singleUnit
+    const typeOffers = !multi
       ? offers
       : (offers || []).filter((o) => {
           const ot = (o.property_type || '').trim();
           if (!ot || !pt) return false;
           return ot.toLowerCase() === String(pt).toLowerCase();
         });
-    return allocatePaymentSummary(typePays, typeOffers, feeConfig, pt ? [pt] : []);
+    const fin = allocatePaymentSummary(typePays, typeOffers, feeConfig, pt ? [pt] : []);
+    if (infraWaived || anyInfraWaived && !multi) {
+      fin.expected = { ...fin.expected, infrastructure: 0 };
+      if (!fin.notes) fin.notes = [];
+      fin.notes = [...(fin.notes || []), 'Infrastructure fee waived for this subscriber'];
+    }
+    return fin;
   }
 
   const perUnitFinance = units.map((u) => {
-    const fin = financeForType(u.property_type);
+    const fin = financeForType(u.property_type, u.infrastructure_waived);
     const propPct = fin.expected.property > 0
       ? Math.round((fin.paid.property / fin.expected.property) * 100)
       : null;
@@ -293,7 +302,7 @@ export default function SubscriberProfile() {
   );
 
   const summaryBits = [];
-  if (units.length > 1) {
+  if (units.length > 1 && units[0].source === 'allocation') {
     summaryBits.push(`${units.length} units`);
     perUnitFinance.slice(0, 3).forEach((u) => {
       if (u.propPct != null) summaryBits.push(`${(u.property_type || 'Unit').split(' ').slice(0, 2).join(' ')} ${u.propPct}%`);
@@ -304,13 +313,31 @@ export default function SubscriberProfile() {
     if (paid.legal_tdp > 0 || expected.legal_tdp > 0) {
       summaryBits.push(tdpPct !== null ? `TDP ${tdpPct}%` : `TDP ₦${paid.legal_tdp.toLocaleString()}`);
     }
-    if (paid.infrastructure > 0 || expected.infrastructure > 0) {
+    if (!anyInfraWaived && (paid.infrastructure > 0 || expected.infrastructure > 0)) {
       summaryBits.push(infraPct !== null ? `Infra ${infraPct}%` : `Infra ₦${paid.infrastructure.toLocaleString()}`);
     }
+    if (anyInfraWaived) summaryBits.push('Infra waived');
   }
   if (paid.other > 0 && units.length <= 1) summaryBits.push(`Other ₦${paid.other.toLocaleString()}`);
   if (totalRefunded > 0) summaryBits.push(`Refund ₦${totalRefunded.toLocaleString()}`);
   if (totalCooFees > 0) summaryBits.push(`COO ₦${totalCooFees.toLocaleString()}`);
+
+  async function toggleInfraWaiver(waive) {
+    try {
+      const ids = allocations.map((a) => a.id).filter(Boolean);
+      if (ids.length) {
+        await supabase.from('allocation_records').update({ infrastructure_waived: waive }).in('id', ids);
+      }
+      const offerIds = offers.map((o) => o.id).filter(Boolean);
+      if (offerIds.length) {
+        await supabase.from('offers').update({ infrastructure_waived: waive }).in('id', offerIds);
+      }
+      // refresh
+      window.location.reload();
+    } catch (e) {
+      alert(e.message || 'Could not update infrastructure waiver');
+    }
+  }
 
   const allRemarks = [
     ...offers.map((o) => o.comment).filter(Boolean),
@@ -395,11 +422,24 @@ export default function SubscriberProfile() {
       <div className="card">
         <h3>Complete Financial Commitment</h3>
         <p className="muted" style={{ marginTop: 0 }}>
-          Each property type is shown separately so totals are not mixed across units.
+          {units.length > 1 && units[0].source === 'allocation'
+            ? 'Each allocated unit is shown separately.'
+            : 'Financials for this subscriber on this estate.'}
           {units.length > 1 && untaggedTotal > 0 && (
-            <span> Untagged payments (no property type on the payment row): <b>₦{untaggedTotal.toLocaleString()}</b> — assign a type on those payment lines for accurate %.</span>
+            <span> Untagged payments: <b>₦{untaggedTotal.toLocaleString()}</b> — set property type on those payment lines.</span>
           )}
         </p>
+        <div className="flex wrap" style={{ gap: 8, marginBottom: 12, alignItems: 'center' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={anyInfraWaived}
+              onChange={(e) => toggleInfraWaiver(e.target.checked)}
+            />
+            <span>Infrastructure fee <b>waived</b> for this subscriber</span>
+          </label>
+          {anyInfraWaived && <span className="tag approved">Infra not charged</span>}
+        </div>
         {perUnitFinance.length === 0 && (
           <p className="muted">No property type on file for this subscriber yet.</p>
         )}
@@ -441,11 +481,21 @@ export default function SubscriberProfile() {
                     </td>
                   </tr>
                   <tr>
-                    <td>Infrastructure</td>
-                    <td className="right">{u.expected.infrastructure > 0 ? u.expected.infrastructure.toLocaleString() : <span className="muted">Not set</span>}</td>
+                    <td>Infrastructure{u.infrastructure_waived || anyInfraWaived ? ' (waived)' : ''}</td>
+                    <td className="right">
+                      {u.infrastructure_waived || anyInfraWaived
+                        ? <span className="muted">Waived</span>
+                        : (u.expected.infrastructure > 0 ? u.expected.infrastructure.toLocaleString() : <span className="muted">Not set</span>)}
+                    </td>
                     <td className="right">{u.paid.infrastructure.toLocaleString()}</td>
-                    <td className="right">{formatBalance(u.expected.infrastructure, u.paid.infrastructure)}</td>
-                    <td>{formatPct(u.expected.infrastructure, u.paid.infrastructure)}</td>
+                    <td className="right">
+                      {u.infrastructure_waived || anyInfraWaived ? '—' : formatBalance(u.expected.infrastructure, u.paid.infrastructure)}
+                    </td>
+                    <td>
+                      {u.infrastructure_waived || anyInfraWaived
+                        ? <span className="tag approved">Waived</span>
+                        : formatPct(u.expected.infrastructure, u.paid.infrastructure)}
+                    </td>
                   </tr>
                   <tr>
                     <td>Legal / TDP</td>

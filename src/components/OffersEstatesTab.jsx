@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
+import { fetchAllFrom } from '../lib/fetchAll';
 
 export default function OffersEstatesTab() {
   const [estates, setEstates] = useState([]);
@@ -13,7 +14,15 @@ export default function OffersEstatesTab() {
     setLoading(true);
     const { data } = await supabase.from('estates').select('*').eq('is_deleted', false).order('name');
     setEstates(data || []);
-    const { data: offers } = await supabase.from('offers').select('estate_id, offer_collected').eq('is_deleted', false);
+    let offers = [];
+    try {
+      offers = await fetchAllFrom('offers', (q) =>
+        q.select('estate_id, offer_collected').eq('is_deleted', false)
+      );
+    } catch {
+      const { data: o } = await supabase.from('offers').select('estate_id, offer_collected').eq('is_deleted', false);
+      offers = o || [];
+    }
     const c = {};
     (offers || []).forEach((o) => {
       c[o.estate_id] = c[o.estate_id] || { total: 0, collected: 0 };

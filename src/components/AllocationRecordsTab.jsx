@@ -11,7 +11,7 @@ import BulkImportModal from './BulkImportModal';
 import { CustomFieldInputs, CustomFieldHeaders, CustomFieldCells } from './CustomFieldWidgets';
 
 const BLANK = {
-  subscriber_name: '', house_no: '', property_type: '',
+  subscriber_name: '', house_no: '', property_type: '', infrastructure_waived: false,
   printed: false, signed: false, collected: false, collected_by: '', collected_date: '',
   phone_number: '', remarks: '',
 };
@@ -94,7 +94,7 @@ export default function AllocationRecordsTab() {
     setEditingRow(row);
     setForm({
       subscriber_name: row.subscriber_name || '', house_no: row.house_no || '',
-      property_type: row.property_type || '', printed: row.printed, signed: row.signed, collected: row.collected,
+      property_type: row.property_type || '', infrastructure_waived: !!row.infrastructure_waived, printed: row.printed, signed: row.signed, collected: row.collected,
       collected_by: row.collected_by || '', collected_date: row.collected_date || '', phone_number: row.phone_number || '',
       remarks: row.remarks || '',
     });
@@ -317,6 +317,7 @@ export default function AllocationRecordsTab() {
                 <div className="field check-field"><input type="checkbox" checked={form.printed} onChange={(e) => setForm({ ...form, printed: e.target.checked })} /><label style={{ margin: 0 }}>Printed</label></div>
                 <div className="field check-field"><input type="checkbox" checked={form.signed} onChange={(e) => setForm({ ...form, signed: e.target.checked })} /><label style={{ margin: 0 }}>Signed</label></div>
                 <div className="field check-field"><input type="checkbox" checked={form.collected} onChange={(e) => setForm({ ...form, collected: e.target.checked })} /><label style={{ margin: 0 }}>Collected</label></div>
+                <div className="field check-field"><input type="checkbox" checked={!!form.infrastructure_waived} onChange={(e) => setForm({ ...form, infrastructure_waived: e.target.checked })} /><label style={{ margin: 0 }}>Infrastructure waived</label></div>
                 <div className="field"><label>Collected By</label><input value={form.collected_by} onChange={(e) => setForm({ ...form, collected_by: e.target.value })} /></div>
                 <div className="field"><label>Date Collected (optional)</label><input type="date" value={form.collected_date} onChange={(e) => setForm({ ...form, collected_date: e.target.value })} /></div>
               </div>

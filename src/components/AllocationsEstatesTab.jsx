@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
+import { fetchAllFrom } from '../lib/fetchAll';
 
 export default function AllocationsEstatesTab() {
   const [estates, setEstates] = useState([]);
@@ -13,7 +14,15 @@ export default function AllocationsEstatesTab() {
     setLoading(true);
     const { data } = await supabase.from('estates').select('*').eq('is_deleted', false).order('name');
     setEstates(data || []);
-    const { data: allocs } = await supabase.from('allocation_records').select('estate_id, collected').eq('is_deleted', false);
+    let allocs = [];
+    try {
+      allocs = await fetchAllFrom('allocation_records', (q) =>
+        q.select('estate_id, collected').eq('is_deleted', false)
+      );
+    } catch {
+      const { data: a } = await supabase.from('allocation_records').select('estate_id, collected').eq('is_deleted', false);
+      allocs = a || [];
+    }
     const c = {};
     (allocs || []).forEach((a) => {
       c[a.estate_id] = c[a.estate_id] || { total: 0, collected: 0 };
