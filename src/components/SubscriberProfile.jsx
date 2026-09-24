@@ -80,6 +80,12 @@ export default function SubscriberProfile() {
   const [docType, setDocType] = useState(DOC_TYPES[0]);
   const [docFile, setDocFile] = useState(null);
   const [docError, setDocError] = useState('');
+  const [editingCoo, setEditingCoo] = useState(null);
+  const [cooForm, setCooForm] = useState({});
+  const [editingPayment, setEditingPayment] = useState(null);
+  const [payForm, setPayForm] = useState({});
+  const [recordBusy, setRecordBusy] = useState(false);
+  const [recordError, setRecordError] = useState('');
 
   useEffect(() => { load(); }, [estateId, name]);
 
@@ -203,6 +209,95 @@ export default function SubscriberProfile() {
     const url = await getDownloadUrl(doc.storage_path);
     if (url) window.open(url, '_blank');
     else alert('Could not generate download link.');
+  }
+
+
+  function openEditCoo(c) {
+    setEditingCoo(c);
+    setRecordError('');
+    setCooForm({
+      previous_owner: c.previous_owner || '',
+      new_owner: c.new_owner || '',
+      date_changed: c.date_changed ? String(c.date_changed).slice(0, 10) : '',
+      property_type: c.property_type || '',
+      status: c.status || '',
+      new_allocation_no: c.new_allocation_no || c.new_pon || '',
+      amount_paid: c.amount_paid ?? '',
+      reason: c.reason || '',
+      remarks: c.remarks || '',
+      comments: c.comments || '',
+    });
+  }
+
+  async function saveCoo(e) {
+    e.preventDefault();
+    if (!editingCoo) return;
+    setRecordBusy(true);
+    setRecordError('');
+    const { error } = await supabase.from('ownership_changes').update({
+      previous_owner: cooForm.previous_owner.trim(),
+      new_owner: cooForm.new_owner.trim(),
+      date_changed: cooForm.date_changed || null,
+      property_type: cooForm.property_type || null,
+      status: cooForm.status || null,
+      new_allocation_no: cooForm.new_allocation_no || null,
+      amount_paid: Number(cooForm.amount_paid) || 0,
+      reason: cooForm.reason || null,
+      remarks: cooForm.remarks || null,
+      comments: cooForm.comments || null,
+    }).eq('id', editingCoo.id);
+    setRecordBusy(false);
+    if (error) { setRecordError(error.message); return; }
+    setEditingCoo(null);
+    load();
+  }
+
+  async function deleteCoo(c) {
+    if (!confirm('Delete this COO record permanently?')) return;
+    const { error } = await supabase.from('ownership_changes').delete().eq('id', c.id);
+    if (error) { alert(error.message); return; }
+    setEditingCoo(null);
+    load();
+  }
+
+  function openEditPayment(p) {
+    setEditingPayment(p);
+    setRecordError('');
+    setPayForm({
+      amount: p.amount ?? '',
+      date_paid: p.date_paid ? String(p.date_paid).slice(0, 10) : '',
+      payment_type: p.payment_type || 'property',
+      property_type: p.property_type || '',
+      payment_reference: p.payment_reference || '',
+      remarks: p.remarks || '',
+    });
+  }
+
+  async function savePayment(e) {
+    e.preventDefault();
+    if (!editingPayment) return;
+    setRecordBusy(true);
+    setRecordError('');
+    const { error } = await supabase.from('payments').update({
+      amount: Number(payForm.amount) || 0,
+      date_paid: payForm.date_paid || null,
+      payment_type: payForm.payment_type || 'property',
+      property_type: payForm.property_type || null,
+      payment_reference: payForm.payment_reference || null,
+      remarks: payForm.remarks || null,
+    }).eq('id', editingPayment.id);
+    setRecordBusy(false);
+    if (error) { setRecordError(error.message); return; }
+    setEditingPayment(null);
+    load();
+  }
+
+  async function deletePayment(p) {
+    if (!confirm('Delete this payment record?')) return;
+    const { error } = await supabase.from('payments').update({ is_deleted: true }).eq('id', p.id);
+    if (error) { alert(error.message); return; }
+    setEditingPayment(null);
+    load();
   }
 
   async function handleDeleteDoc(doc) {
@@ -364,6 +459,16 @@ export default function SubscriberProfile() {
         <div>
           <Link to={`/estates/${estateId}`} className="muted">&larr; {estate?.name}</Link>
           <h2>{decodedName}</h2>
+          <p className="muted" style={{ margin: '6px 0 0' }}>
+            Scroll to a section below and use <b>Edit</b> on any row, or open the register links on the right.
+          </p>
+        </div>
+        <div className="flex wrap" style={{ gap: 8 }}>
+          <Link className="btn btn-outline btn-sm" to={`/payments/${estateId}`}>Payments register</Link>
+          <Link className="btn btn-outline btn-sm" to={`/allocations/${estateId}`}>Allocations register</Link>
+          <Link className="btn btn-outline btn-sm" to={`/offers/${estateId}`}>Offers register</Link>
+          <Link className="btn btn-outline btn-sm" to="/coo">COO list</Link>
+          <Link className="btn btn-outline btn-sm" to="/refunds">Refunds</Link>
         </div>
       </div>
 
@@ -681,6 +786,7 @@ export default function SubscriberProfile() {
                 <th style={{ width: '20%', textAlign: 'right' }}>Amount (₦)</th>
                 <th style={{ width: '20%' }}>Reference</th>
                 <th>Remarks</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -700,11 +806,17 @@ export default function SubscriberProfile() {
                     </td>
                     <td>{p.payment_reference || '—'}</td>
                     <td>{p.remarks || '—'}</td>
+                    <td>
+                      <div className="flex">
+                        <button type="button" className="btn btn-outline btn-sm" onClick={() => openEditPayment(p)}>Edit</button>
+                        <button type="button" className="btn btn-danger btn-sm" onClick={() => deletePayment(p)}>Delete</button>
+                      </div>
+                    </td>
                   </tr>
                 );
               })}
               {payments.length === 0 && (
-                <tr><td colSpan={5} className="empty-state">No payment entries found for this name in this estate.</td></tr>
+                <tr><td colSpan={6} className="empty-state">No payment entries found for this name in this estate.</td></tr>
               )}
             </tbody>
           </table>
@@ -744,6 +856,7 @@ export default function SubscriberProfile() {
 
       <div className="card">
         <h3>Change of Ownership (COO)</h3>
+        <p className="muted" style={{ marginTop: 0 }}>Click <b>Edit</b> on a row below to change or delete this ownership record.</p>
         <div className="table-wrap">
           <table>
             <thead>
@@ -754,6 +867,7 @@ export default function SubscriberProfile() {
                 <th className="right">COO Fee (₦)</th>
                 <th>Reason</th>
                 <th>Remarks</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -765,11 +879,17 @@ export default function SubscriberProfile() {
                   <td className="right">{Number(c.amount_paid || 0).toLocaleString()}</td>
                   <td>{c.reason || '—'}</td>
                   <td>{c.comments || c.remarks || '—'}</td>
+                  <td>
+                    <div className="flex">
+                      <button type="button" className="btn btn-primary btn-sm" onClick={() => openEditCoo(c)}>Edit</button>
+                      <button type="button" className="btn btn-danger btn-sm" onClick={() => deleteCoo(c)}>Delete</button>
+                    </div>
+                  </td>
                 </tr>
               ))}
               {cooRows.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="empty-state">
+                  <td colSpan={7} className="empty-state">
                     No COO records for this name in this estate. Record one from Allocations → the house row → <b>Record COO</b>.
                   </td>
                 </tr>
@@ -875,6 +995,68 @@ export default function SubscriberProfile() {
           <ul>
             {allRemarks.map((r, i) => <li key={i}>{r}</li>)}
           </ul>
+        </div>
+      )}
+
+
+      {editingCoo && (
+        <div className="modal-overlay" onClick={() => !recordBusy && setEditingCoo(null)}>
+          <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
+            <h3>Edit COO record</h3>
+            <form onSubmit={saveCoo}>
+              <div className="grid cols-2">
+                <div className="field"><label>Previous owner</label><input value={cooForm.previous_owner || ''} onChange={(e) => setCooForm({ ...cooForm, previous_owner: e.target.value })} required /></div>
+                <div className="field"><label>New owner</label><input value={cooForm.new_owner || ''} onChange={(e) => setCooForm({ ...cooForm, new_owner: e.target.value })} required /></div>
+                <div className="field"><label>Date</label><input type="date" value={cooForm.date_changed || ''} onChange={(e) => setCooForm({ ...cooForm, date_changed: e.target.value })} /></div>
+                <div className="field"><label>Property type</label><input value={cooForm.property_type || ''} onChange={(e) => setCooForm({ ...cooForm, property_type: e.target.value })} /></div>
+                <div className="field"><label>House / Allocation</label><input value={cooForm.new_allocation_no || ''} onChange={(e) => setCooForm({ ...cooForm, new_allocation_no: e.target.value })} /></div>
+                <div className="field"><label>Status</label><input value={cooForm.status || ''} onChange={(e) => setCooForm({ ...cooForm, status: e.target.value })} /></div>
+                <div className="field"><label>COO fee (₦)</label><input type="number" value={cooForm.amount_paid ?? ''} onChange={(e) => setCooForm({ ...cooForm, amount_paid: e.target.value })} /></div>
+                <div className="field"><label>Reason</label><input value={cooForm.reason || ''} onChange={(e) => setCooForm({ ...cooForm, reason: e.target.value })} /></div>
+                <div className="field"><label>Remarks</label><input value={cooForm.remarks || ''} onChange={(e) => setCooForm({ ...cooForm, remarks: e.target.value })} /></div>
+                <div className="field"><label>Comments</label><input value={cooForm.comments || ''} onChange={(e) => setCooForm({ ...cooForm, comments: e.target.value })} /></div>
+              </div>
+              {recordError && <div className="error-text">{recordError}</div>}
+              <div className="modal-actions" style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+                <button type="button" className="btn btn-danger" onClick={() => deleteCoo(editingCoo)}>Delete this record</button>
+                <div className="flex">
+                  <button type="button" className="btn btn-outline" onClick={() => setEditingCoo(null)}>Cancel</button>
+                  <button type="submit" className="btn btn-primary" disabled={recordBusy}>{recordBusy ? 'Saving…' : 'Save'}</button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {editingPayment && (
+        <div className="modal-overlay" onClick={() => !recordBusy && setEditingPayment(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Edit payment</h3>
+            <form onSubmit={savePayment}>
+              <div className="field"><label>Amount</label><input type="number" value={payForm.amount ?? ''} onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })} required /></div>
+              <div className="field"><label>Date</label><input type="date" value={payForm.date_paid || ''} onChange={(e) => setPayForm({ ...payForm, date_paid: e.target.value })} /></div>
+              <div className="field"><label>Payment type</label>
+                <select value={payForm.payment_type || 'property'} onChange={(e) => setPayForm({ ...payForm, payment_type: e.target.value })}>
+                  <option value="property">Property</option>
+                  <option value="infrastructure">Infrastructure</option>
+                  <option value="legal_tdp">Legal / TDP</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+              <div className="field"><label>Property type</label><input value={payForm.property_type || ''} onChange={(e) => setPayForm({ ...payForm, property_type: e.target.value })} /></div>
+              <div className="field"><label>Reference</label><input value={payForm.payment_reference || ''} onChange={(e) => setPayForm({ ...payForm, payment_reference: e.target.value })} /></div>
+              <div className="field"><label>Remarks</label><input value={payForm.remarks || ''} onChange={(e) => setPayForm({ ...payForm, remarks: e.target.value })} /></div>
+              {recordError && <div className="error-text">{recordError}</div>}
+              <div className="modal-actions" style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+                <button type="button" className="btn btn-danger" onClick={() => deletePayment(editingPayment)}>Delete this record</button>
+                <div className="flex">
+                  <button type="button" className="btn btn-outline" onClick={() => setEditingPayment(null)}>Cancel</button>
+                  <button type="submit" className="btn btn-primary" disabled={recordBusy}>{recordBusy ? 'Saving…' : 'Save'}</button>
+                </div>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
