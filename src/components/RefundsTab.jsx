@@ -139,6 +139,7 @@ export default function RefundsTab() {
   const [sortDir, setSortDir] = useState('desc');
   const [bulkPropertyType, setBulkPropertyType] = useState('');
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [selected, setSelected] = useState(() => new Set());
   const [editingRow, setEditingRow] = useState(null);
   const [form, setForm] = useState(BLANK);
   const [customData, setCustomData] = useState({});
@@ -158,6 +159,7 @@ export default function RefundsTab() {
       .eq('is_deleted', false)
       .order('serial_no', { ascending: false });
     setRows(data || []);
+    setSelected(new Set());
     setLoading(false);
   }
 
@@ -341,6 +343,77 @@ export default function RefundsTab() {
     load();
   }
 
+  function toggleSelect(id) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAllFiltered() {
+    if (filtered.length && filtered.every((r) => selected.has(r.id))) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(filtered.map((r) => r.id)));
+    }
+  }
+
+  /** Soft-delete selected rows (chunks). Bypasses one-by-one approval for bulk clean-up. */
+  async function handleDeleteSelected() {
+    const ids = [...selected];
+    if (!ids.length) { alert('Select at least one row first.'); return; }
+    if (!confirm(`Soft-delete ${ids.length} selected refund record(s)? They will leave the list.`)) return;
+    setBulkBusy(true);
+    let done = 0;
+    let errMsg = '';
+    for (let i = 0; i < ids.length; i += 200) {
+      const chunk = ids.slice(i, i + 200);
+      const { data, error } = await supabase
+        .from('refunds')
+        .update({ is_deleted: true })
+        .in('id', chunk)
+        .select('id');
+      if (error) { errMsg = error.message; break; }
+      done += (data || []).length;
+    }
+    setBulkBusy(false);
+    if (errMsg) alert(`Deleted ${done}. Error: ${errMsg}`);
+    else alert(`Deleted ${done} refund record(s).`);
+    load();
+  }
+
+  /** Soft-delete every row currently shown by filters (estate / type / search). */
+  async function handleDeleteAllFiltered() {
+    if (!filtered.length) { alert('No rows match the current filters.'); return; }
+    if (!confirm(
+      `Soft-delete ALL ${filtered.length} refund row(s) currently shown (filters applied)?\n\nTip: filter to the wrong estate or "Unspecified" first, then run this.`
+    )) return;
+    const typed = prompt(`Type DELETE ${filtered.length} to confirm:`);
+    if (typed !== `DELETE ${filtered.length}`) { alert('Cancelled.'); return; }
+    setSelected(new Set(filtered.map((r) => r.id)));
+    // reuse selected delete path
+    const ids = filtered.map((r) => r.id);
+    setBulkBusy(true);
+    let done = 0;
+    let errMsg = '';
+    for (let i = 0; i < ids.length; i += 200) {
+      const chunk = ids.slice(i, i + 200);
+      const { data, error } = await supabase
+        .from('refunds')
+        .update({ is_deleted: true })
+        .in('id', chunk)
+        .select('id');
+      if (error) { errMsg = error.message; break; }
+      done += (data || []).length;
+    }
+    setBulkBusy(false);
+    if (errMsg) alert(`Deleted ${done}. Error: ${errMsg}`);
+    else alert(`Deleted ${done} refund record(s).`);
+    load();
+  }
+
   /** Set property type on all currently filtered rows (e.g. after import without a type). */
   async function handleBulkSetPropertyType() {
     const pt = bulkPropertyType.trim();
@@ -418,7 +491,22 @@ export default function RefundsTab() {
         <div className="flex">
           <button className="btn btn-outline" onClick={() => setShowColumns(true)}>Manage Columns</button>
           <button className="btn btn-outline" onClick={() => setShowImport(true)}>Bulk Import</button>
-          <button className="btn btn-danger" onClick={handleClearAllRefunds} disabled={bulkBusy}>
+          <button
+            className="btn btn-danger"
+            onClick={handleDeleteSelected}
+            disabled={bulkBusy || selected.size === 0}
+          >
+            {bulkBusy ? 'Working…' : `Delete selected (${selected.size})`}
+          </button>
+          <button
+            className="btn btn-danger"
+            onClick={handleDeleteAllFiltered}
+            disabled={bulkBusy || filtered.length === 0}
+            title="Deletes every row matching current filters"
+          >
+            Delete all filtered ({filtered.length})
+          </button>
+          <button className="btn btn-outline" onClick={handleClearAllRefunds} disabled={bulkBusy}>
             {bulkBusy ? 'Working…' : 'Clear All Refunds'}
           </button>
           <button className="btn btn-primary" onClick={openNew}>+ New Refund Entry</button>
@@ -595,6 +683,14 @@ export default function RefundsTab() {
           <table>
             <thead>
               <tr>
+                <th style={{ width: 36 }}>
+                  <input
+                    type="checkbox"
+                    checked={filtered.length > 0 && filtered.every((r) => selected.has(r.id))}
+                    onChange={toggleSelectAllFiltered}
+                    title="Select all filtered rows"
+                  />
+                </th>
                 <th style={{ cursor: 'pointer' }} onClick={() => toggleSort('serial_no')}>{sortLabel('serial_no', 'S/N')}</th>
                 <th style={{ cursor: 'pointer' }} onClick={() => toggleSort('subscriber_name')}>{sortLabel('subscriber_name', 'Subscriber')}</th>
                 <th style={{ cursor: 'pointer' }} onClick={() => toggleSort('estate')}>{sortLabel('estate', 'Estate')}</th>
@@ -620,6 +716,13 @@ export default function RefundsTab() {
                   }}
                   title={r.estate_id ? 'Open profile' : undefined}
                 >
+                  <td onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={selected.has(r.id)}
+                      onChange={() => toggleSelect(r.id)}
+                    />
+                  </td>
                   <td>{r.serial_no ?? i + 1}</td>
                   <td>
                     {r.estate_id ? (
@@ -646,7 +749,7 @@ export default function RefundsTab() {
               ))}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={10 + customFields.length} className="empty-state">
+                  <td colSpan={11 + customFields.length} className="empty-state">
                     No refund entries found. Use <b>Bulk Import</b> or <b>+ New Refund Entry</b> to add records.
                   </td>
                 </tr>
@@ -655,7 +758,7 @@ export default function RefundsTab() {
             {filtered.length > 0 && (
               <tfoot>
                 <tr style={{ fontWeight: 700, background: '#f1f5f9' }}>
-                  <td colSpan={5}>TOTAL ({totals.count} refund{totals.count === 1 ? '' : 's'})</td>
+                  <td colSpan={6}>TOTAL ({totals.count} refund{totals.count === 1 ? '' : 's'})</td>
                   <td className="right">{totals.requested.toLocaleString()}</td>
                   <td className="right">{totals.approved.toLocaleString()}</td>
                   <td colSpan={2 + customFields.length + 1}></td>
