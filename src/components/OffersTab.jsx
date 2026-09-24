@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { fetchAllFrom } from '../lib/fetchAll';
 import { useAuth } from '../lib/AuthContext';
@@ -33,6 +33,7 @@ export const OFFER_FIELD_DEFS = [
 
 export default function OffersTab() {
   const { estateId } = useParams();
+  const navigate = useNavigate();
   const { profile, isSupervisorPlus, isAdmin } = useAuth();
   const [estate, setEstate] = useState(null);
   const [rows, setRows] = useState([]);
@@ -227,7 +228,16 @@ export default function OffersTab() {
             </thead>
             <tbody>
               {filtered.map((r) => (
-                <tr key={r.id}>
+                <tr
+                  key={r.id}
+                  style={{ cursor: r.subscriber_name ? 'pointer' : undefined }}
+                  onClick={() => {
+                    if (r.subscriber_name && estateId) {
+                      navigate(`/subscriber/${estateId}/${encodeURIComponent(r.subscriber_name)}`);
+                    }
+                  }}
+                  title={r.subscriber_name ? 'Open profile' : undefined}
+                >
                   <td>{r.localSerial}</td>
                   <td><Link to={`/subscriber/${estateId}/${encodeURIComponent(r.subscriber_name)}`}>{r.subscriber_name}</Link></td>
                   <td>{r.form_no}</td>
@@ -242,7 +252,7 @@ export default function OffersTab() {
                   <CustomFieldCells fields={customFields} values={r.custom_data} />
                   <td>{r.comment}</td>
                   <td>{r.remarks}</td>
-                  <td>
+                  <td onClick={(e) => e.stopPropagation()}>
                     <div className="flex wrap">
                       <button className="btn btn-outline btn-sm" onClick={() => openEdit(r)}>Edit</button>
                       <button className="btn btn-outline btn-sm" onClick={() => openCoo(r)}>Record COO</button>

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { fetchAllFrom } from '../lib/fetchAll';
 import { useAuth } from '../lib/AuthContext';
@@ -31,6 +31,7 @@ export const ALLOCATION_FIELD_DEFS = [
 
 export default function AllocationRecordsTab() {
   const { estateId } = useParams();
+  const navigate = useNavigate();
   const { profile, isSupervisorPlus, isAdmin } = useAuth();
   const [estate, setEstate] = useState(null);
   const [rows, setRows] = useState([]);
@@ -267,7 +268,16 @@ export default function AllocationRecordsTab() {
             </thead>
             <tbody>
               {filtered.map((r) => (
-                <tr key={r.id}>
+                <tr
+                  key={r.id}
+                  style={{ cursor: r.subscriber_name ? 'pointer' : undefined }}
+                  onClick={() => {
+                    if (r.subscriber_name && estateId) {
+                      navigate(`/subscriber/${estateId}/${encodeURIComponent(r.subscriber_name)}`);
+                    }
+                  }}
+                  title={r.subscriber_name ? 'Open profile' : undefined}
+                >
                   <td>{r.localSerial}</td>
                   <td>{r.house_no}</td>
                   <td>{r.subscriber_name ? <Link to={`/subscriber/${estateId}/${encodeURIComponent(r.subscriber_name)}`}>{r.subscriber_name}</Link> : <span className="tag rejected">Vacant</span>}</td>
@@ -280,7 +290,7 @@ export default function AllocationRecordsTab() {
                   <td>{r.phone_number}</td>
                   <CustomFieldCells fields={customFields} values={r.custom_data} />
                   <td>{r.remarks}</td>
-                  <td>
+                  <td onClick={(e) => e.stopPropagation()}>
                     <div className="flex wrap">
                       <button className="btn btn-outline btn-sm" onClick={() => openEdit(r)}>Edit</button>
                       {r.subscriber_name && <button className="btn btn-outline btn-sm" onClick={() => openCoo(r)}>Record COO</button>}

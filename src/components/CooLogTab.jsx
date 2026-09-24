@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../lib/AuthContext';
 import BulkImportModal from './BulkImportModal';
@@ -153,6 +153,7 @@ const EDIT_BLANK = {
 
 export default function CooLogTab() {
   const { profile } = useAuth();
+  const navigate = useNavigate();
   const [rows, setRows] = useState([]);
   const [estates, setEstates] = useState([]);
   const [estateFilter, setEstateFilter] = useState('');
@@ -291,7 +292,7 @@ export default function CooLogTab() {
         <div>
           <h2>Change of Ownership — History</h2>
           <p className="muted" style={{ margin: 0 }}>
-            Click a row to open details. Edit or delete at the bottom of the detail panel.
+            Click a row to open the subscriber profile. Use “COO details” to view/edit/delete this ownership change.
           </p>
         </div>
         <div className="flex wrap">
@@ -378,8 +379,13 @@ export default function CooLogTab() {
               {filtered.map((r, i) => (
                 <tr
                   key={r.id}
-                  style={{ cursor: 'pointer' }}
-                  onClick={() => openDetail(r)}
+                  style={{ cursor: estateIdOf(r) && r.new_owner ? 'pointer' : undefined }}
+                  onClick={() => {
+                    const eid = estateIdOf(r);
+                    const name = r.new_owner || r.previous_owner;
+                    if (eid && name) navigate(`/subscriber/${eid}/${encodeURIComponent(name)}`);
+                  }}
+                  title={estateIdOf(r) ? 'Open subscriber profile' : undefined}
                 >
                   <td onClick={(e) => e.stopPropagation()}>
                     <input
@@ -408,7 +414,7 @@ export default function CooLogTab() {
                   <td className="right">{Number(r.amount_paid || 0).toLocaleString()}</td>
                   <td onClick={(e) => e.stopPropagation()}>
                     <div className="flex">
-                      <button type="button" className="btn btn-outline btn-sm" onClick={() => openDetail(r)}>Open</button>
+                      <button type="button" className="btn btn-outline btn-sm" onClick={() => openDetail(r)}>COO details</button>
                       <button type="button" className="btn btn-danger btn-sm" disabled={busy} onClick={() => deleteIds([r.id])}>Delete</button>
                     </div>
                   </td>
@@ -432,6 +438,18 @@ export default function CooLogTab() {
             <h3>COO record</h3>
             {!editing ? (
               <>
+                <div className="flex wrap" style={{ marginBottom: 12, gap: 8 }}>
+                  {estateIdOf(detail) && detail.new_owner && (
+                    <Link className="btn btn-primary btn-sm" to={`/subscriber/${estateIdOf(detail)}/${encodeURIComponent(detail.new_owner)}`}>
+                      Open new owner profile
+                    </Link>
+                  )}
+                  {estateIdOf(detail) && detail.previous_owner && (
+                    <Link className="btn btn-outline btn-sm" to={`/subscriber/${estateIdOf(detail)}/${encodeURIComponent(detail.previous_owner)}`}>
+                      Open previous owner profile
+                    </Link>
+                  )}
+                </div>
                 <div className="grid cols-2">
                   <p><b>Date:</b> {detail.date_changed || '—'}</p>
                   <p><b>Estate:</b> {estateOf(detail)}</p>

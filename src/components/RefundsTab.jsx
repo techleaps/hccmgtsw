@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../lib/AuthContext';
 import { submitOrApplyUpdate, submitOrApplyDelete } from '../lib/recordActions';
@@ -105,6 +106,7 @@ export const REFUND_FIELD_DEFS = [
 
 export default function RefundsTab() {
   const { profile, isSupervisorPlus } = useAuth();
+  const navigate = useNavigate();
   const [rows, setRows] = useState([]);
   const [estates, setEstates] = useState([]);
   const [customFields, setCustomFields] = useState([]);
@@ -521,9 +523,24 @@ export default function RefundsTab() {
             </thead>
             <tbody>
               {filtered.map((r, i) => (
-                <tr key={r.id}>
+                <tr
+                  key={r.id}
+                  style={{ cursor: r.estate_id && r.subscriber_name ? 'pointer' : undefined }}
+                  onClick={() => {
+                    if (r.estate_id && r.subscriber_name) {
+                      navigate(`/subscriber/${r.estate_id}/${encodeURIComponent(r.subscriber_name)}`);
+                    }
+                  }}
+                  title={r.estate_id ? 'Open profile' : undefined}
+                >
                   <td>{r.serial_no ?? i + 1}</td>
-                  <td>{r.subscriber_name}</td>
+                  <td>
+                    {r.estate_id ? (
+                      <Link to={`/subscriber/${r.estate_id}/${encodeURIComponent(r.subscriber_name)}`} onClick={(e) => e.stopPropagation()}>
+                        {r.subscriber_name}
+                      </Link>
+                    ) : r.subscriber_name}
+                  </td>
                   <td>{r.estates?.name || '—'}</td>
                   <td>{r.property_type || '—'}</td>
                   <td>{r.reason || '—'}</td>
@@ -532,7 +549,7 @@ export default function RefundsTab() {
                   <td>{r.date_of_approval || '—'}</td>
                   <td>{r.remarks || '—'}</td>
                   <CustomFieldCells fields={customFields} values={r.custom_data} />
-                  <td>
+                  <td onClick={(e) => e.stopPropagation()}>
                     <div className="flex">
                       <button className="btn btn-outline btn-sm" onClick={() => openEdit(r)}>Edit</button>
                       <button className="btn btn-danger btn-sm" onClick={() => handleDelete(r)}>Delete</button>
