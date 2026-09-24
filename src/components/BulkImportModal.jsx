@@ -304,6 +304,45 @@ export default function BulkImportModal({ title, tableName, fieldDefs, estates =
       return true;
     });
 
+    // Refunds: flag same person + amount already recorded on ANOTHER estate (do not auto-skip)
+    if (tableName === 'refunds') {
+      try {
+        const crossFp = new Map(); // fp -> estate label
+        let from = 0;
+        const pageSize = 1000;
+        for (;;) {
+          const { data, error } = await supabase
+            .from('refunds')
+            .select('subscriber_name, amount_approved, date_of_approval, estate_id, estates(name)')
+            .eq('is_deleted', false)
+            .range(from, from + pageSize - 1);
+          if (error) break;
+          const batch = data || [];
+          batch.forEach((row) => {
+            const fp = recordFingerprint('refundsCrossEstate', row);
+            if (!fp || fp.startsWith('|')) return;
+            // only care if different estate than the one we are importing into
+            if (estateId && row.estate_id === estateId) return;
+            const label = row.estates?.name || row.estate_id || 'other estate';
+            if (!crossFp.has(fp)) crossFp.set(fp, label);
+          });
+          if (batch.length < pageSize) break;
+          from += pageSize;
+        }
+        allRecords.forEach((r, i) => {
+          if (!include[i] && flags[i]?.includes('Already')) return;
+          const fp = recordFingerprint('refundsCrossEstate', r);
+          if (crossFp.has(fp)) {
+            flags[i] = flags[i]
+              ? `${flags[i]} · Also on ${crossFp.get(fp)} (same name+amount)`
+              : `Same name+amount already on ${crossFp.get(fp)} — review before import`;
+          }
+        });
+      } catch (err) {
+        console.warn('cross-estate refund scan', err);
+      }
+    }
+
     // Fuzzy note (still imported unless exact fp match)
     for (let i = 0; i < allRecords.length; i += 1) {
       if (flags[i]?.includes('Already')) continue;

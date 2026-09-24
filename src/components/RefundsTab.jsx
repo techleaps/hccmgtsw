@@ -21,56 +21,72 @@ const BLANK = {
 export const REFUND_FIELD_DEFS = [
   {
     key: 'subscriber_name',
-    label: 'Who Was Refunded / Subscriber Name',
+    label: 'Subscriber / Who Was Refunded',
     type: 'text',
     required: true,
     synonyms: [
-      'who was refunded', 'to whom refunded', 'to whom', 'who was refunded name', 'subscriber', 'subscriber name',
-      'names', 'name', 'beneficiary', 'payee', 'refunded to',
+      'subscriber', 'subscriber name', 'who was refunded', 'to whom refunded', 'to whom',
+      'names', 'name', 'beneficiary', 'payee', 'refunded to', 'who was refunded name',
     ],
   },
   {
     key: 'property_type',
-    label: 'Property Type',
+    label: 'Money For / Property Type',
     type: 'text',
-    synonyms: ['property type', 'type', 'house type', 'unit type'],
-  },
-  {
-    key: 'date_of_approval',
-    label: 'Date of Refund',
-    type: 'date',
     synonyms: [
-      'date of refund', 'refund date', 'date of approval', 'date approved', 'date of refund',
-      'date', 'approval date', 'paid on', 'date paid',
+      'money for / property type', 'money for', 'property type', 'type', 'house type',
+      'unit type', 'for property', 'property',
     ],
   },
   {
+    key: 'date_of_approval',
+    label: 'Date Approved / Date of Refund',
+    type: 'date',
+    synonyms: [
+      'date approved', 'date of approval', 'date of refund', 'refund date',
+      'approval date', 'paid on', 'date paid',
+    ],
+  },
+  {
+    key: 'date_applied',
+    label: 'Date Applied',
+    type: 'date',
+    synonyms: ['date applied', 'application date', 'date of application', 'applied on'],
+  },
+  {
     key: 'amount_approved',
-    label: 'Amount Refunded',
+    label: 'Amount Approved / Refunded',
     type: 'number',
     required: true,
     synonyms: [
-      'amount refunded', 'amount approved', 'refund amount', 'amount paid',
-      'amount', 'refunded', 'sum refunded', 'total refunded',
+      'amount approved', 'amount refunded', 'refund amount', 'sum refunded',
+      'total refunded', 'approved amount',
     ],
   },
   {
     key: 'amount_requested',
     label: 'Amount Requested',
     type: 'number',
-    synonyms: ['amount requested', 'requested amount', 'request amount'],
+    synonyms: [
+      'amount requested for', 'amount requested', 'requested amount', 'request amount',
+    ],
   },
   {
     key: 'amount_subscriber_has',
-    label: 'Amount Subscriber Has',
+    label: 'Amount Paid (by subscriber into project)',
     type: 'number',
-    synonyms: ['amount subscriber has', 'subscriber has', 'balance held'],
+    synonyms: [
+      'amount paid', 'amount subscriber has', 'subscriber has', 'balance held',
+      'total paid', 'sum paid',
+    ],
   },
   {
     key: 'reason',
-    label: 'Reason for Refund',
+    label: 'Description / Reason',
     type: 'text',
-    synonyms: ['reason', 'reason for refund', 'purpose'],
+    synonyms: [
+      'description', 'reason', 'reason for refund', 'purpose', 'grounds',
+    ],
   },
   {
     key: 'refund_made_by',
@@ -79,30 +95,32 @@ export const REFUND_FIELD_DEFS = [
     synonyms: ['refund made by', 'made by', 'processed by', 'approved by'],
   },
   {
-    key: 'account_paid_to',
-    label: 'Account Paid To',
-    type: 'text',
-    synonyms: ['account paid to', 'paid to', 'bank account', 'account'],
-  },
-  {
     key: 'account_to_be_paid',
     label: 'Account To Be Paid',
     type: 'text',
-    synonyms: ['account to be paid', 'to be paid'],
+    synonyms: ['account to be paid', 'account', 'bank account'],
+  },
+  {
+    key: 'account_paid_to',
+    label: 'Account Paid To',
+    type: 'text',
+    synonyms: ['account paid to', 'paid to'],
+  },
+  {
+    key: 'comments',
+    label: 'Comment',
+    type: 'text',
+    synonyms: ['comment', 'comments'],
   },
   {
     key: 'remarks',
     label: 'Remarks',
     type: 'text',
-    synonyms: ['remarks', 'remark', 'comment', 'comments', 'note', 'notes'],
-  },
-  {
-    key: 'comments',
-    label: 'Comments',
-    type: 'text',
-    synonyms: ['comments', 'comment'],
+    synonyms: ['remarks', 'remark', 'notes', 'note'],
   },
 ];
+
+
 
 export default function RefundsTab() {
   const { profile, isSupervisorPlus } = useAuth();
@@ -234,6 +252,33 @@ export default function RefundsTab() {
     return [...map.values()].sort((a, b) => b.approved - a.approved);
   }, [filtered]);
 
+
+  /** Same person + same approved amount on more than one estate */
+  const crossEstateDupes = useMemo(() => {
+    const map = new Map();
+    rows.forEach((r) => {
+      const name = String(r.subscriber_name || '').trim().toLowerCase();
+      if (!name) return;
+      const amt = Number(r.amount_approved || 0);
+      if (!(amt > 0)) return;
+      const key = `${name}|${amt.toFixed(2)}`;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(r);
+    });
+    return [...map.entries()]
+      .map(([, list]) => {
+        const estates = [...new Set(list.map((r) => r.estates?.name || r.estate_id || '—'))];
+        return { list, estates, name: list[0].subscriber_name, amount: Number(list[0].amount_approved || 0) };
+      })
+      .filter((g) => g.estates.length > 1 || g.list.length > 1)
+      .filter((g) => {
+        // highlight multi-estate OR multi-row same amount
+        const estateIds = new Set(g.list.map((r) => r.estate_id).filter(Boolean));
+        return estateIds.size > 1 || g.list.length > 1;
+      })
+      .sort((a, b) => b.amount - a.amount);
+  }, [rows]);
+
   function openNew() { setEditingRow(null); setForm(BLANK); setCustomData({}); setError(''); setShowModal(true); }
   function openEdit(row) {
     setEditingRow(row);
@@ -347,13 +392,22 @@ export default function RefundsTab() {
   function transformImportRecord(r) {
     const amountApproved = Number(r.amount_approved) || 0;
     const amountRequested = Number(r.amount_requested) || amountApproved;
+    const bits = [];
+    if (r.date_applied) bits.push(`Applied: ${r.date_applied}`);
+    if (r.date_applied && r.remarks) { /* keep remarks */ }
+    const extra = bits.join(' · ');
+    // date_applied is not always a DB column — fold into remarks/comments
+    const { date_applied, ...rest } = r;
     return {
-      ...r,
+      ...rest,
       amount_approved: amountApproved,
       amount_requested: amountRequested,
       amount_subscriber_has: Number(r.amount_subscriber_has) || 0,
-      property_type: r.property_type?.trim() || null,
+      property_type: (r.property_type || '').trim() || null,
       subscriber_name: String(r.subscriber_name || '').trim(),
+      remarks: [r.remarks, extra].filter(Boolean).join(' · ') || null,
+      reason: r.reason || null,
+      comments: r.comments || null,
     };
   }
 
@@ -388,6 +442,39 @@ export default function RefundsTab() {
 
       <div className="grid cols-2">
         <div className="card">
+          
+      {crossEstateDupes.length > 0 && (
+        <div className="card" style={{ borderLeft: '4px solid #dc2626', background: '#fef2f2' }}>
+          <h3 style={{ marginTop: 0, color: '#991b1b' }}>Possible duplicate refunds</h3>
+          <p className="muted">
+            Same subscriber and same approved amount appearing more than once (including across estates).
+            Review whether these are legitimate separate refunds or double-recording.
+          </p>
+          <div className="table-wrap" style={{ maxHeight: 320, overflow: 'auto' }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Subscriber</th>
+                  <th className="right">Amount (₦)</th>
+                  <th>Times</th>
+                  <th>Estates</th>
+                </tr>
+              </thead>
+              <tbody>
+                {crossEstateDupes.slice(0, 40).map((g, i) => (
+                  <tr key={i}>
+                    <td>{g.name}</td>
+                    <td className="right">{g.amount.toLocaleString()}</td>
+                    <td><span className="tag rejected">{g.list.length}×</span></td>
+                    <td>{g.estates.join(', ')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
           <h3>Total Refunded by Estate</h3>
           <div className="table-wrap">
             <table>

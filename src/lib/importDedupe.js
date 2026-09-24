@@ -45,6 +45,12 @@ export function recordFingerprint(tableName, rec) {
         num(rec.amount_approved ?? rec.amount),
         dateKey(rec.date_of_approval ?? rec.date_paid),
       ].join('|');
+    case 'refundsCrossEstate':
+      // Same person + same approved amount (date optional) — possible double recording across estates
+      return [
+        normalizePersonName(rec.subscriber_name),
+        num(rec.amount_approved ?? rec.amount),
+      ].join('|');
     case 'ownership_changes':
       return [
         normalizePersonName(rec.previous_owner),
