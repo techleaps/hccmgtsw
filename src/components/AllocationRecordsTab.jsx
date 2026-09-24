@@ -331,9 +331,22 @@ export default function AllocationRecordsTab() {
 
               <div className="field"><label>Remarks</label><textarea rows={2} value={form.remarks} onChange={(e) => setForm({ ...form, remarks: e.target.value })} /></div>
               {error && <div className="error-text">{error}</div>}
-              <div className="modal-actions">
-                <button type="button" className="btn btn-outline" onClick={() => setShowModal(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save Record'}</button>
+              <div className="modal-actions" style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+                <div>
+                  {editingRow && (
+                    <button
+                      type="button"
+                      className="btn btn-danger"
+                      onClick={() => { setShowModal(false); handleDelete(editingRow); }}
+                    >
+                      Delete this record
+                    </button>
+                  )}
+                </div>
+                <div className="flex">
+                  <button type="button" className="btn btn-outline" onClick={() => setShowModal(false)}>Cancel</button>
+                  <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save Record'}</button>
+                </div>
               </div>
             </form>
           </div>

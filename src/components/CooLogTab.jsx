@@ -4,7 +4,6 @@ import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../lib/AuthContext';
 import BulkImportModal from './BulkImportModal';
 
-/** Maps your COO Excel columns to ownership_changes */
 export const COO_FIELD_DEFS = [
   {
     key: 'previous_owner',
@@ -97,7 +96,6 @@ export const COO_FIELD_DEFS = [
 function ensureIsoDate(v) {
   if (!v) return null;
   if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v)) return v.slice(0, 10);
-  // last-resort parse for values that slipped through
   const s = String(v).trim();
   const months = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12 };
   const m2 = s.match(/^(\d{1,2})[\/\-\s]+([A-Za-z]{3,9})[\/\-\s]+(\d{2,4})$/);
@@ -125,7 +123,6 @@ function transformCooRecord(r) {
   const extra = bits.join(' · ');
   const comments = [r.comments, extra].filter(Boolean).join(' | ') || null;
   let dateChanged = ensureIsoDate(r.date_changed);
-  // DB requires date_changed NOT NULL — use today only if sheet left it blank
   if (!dateChanged) dateChanged = new Date().toISOString().slice(0, 10);
   return {
     previous_owner: String(r.previous_owner || '').trim(),
@@ -140,6 +137,20 @@ function transformCooRecord(r) {
   };
 }
 
+const EDIT_BLANK = {
+  previous_owner: '',
+  new_owner: '',
+  date_changed: '',
+  property_type: '',
+  status: '',
+  new_allocation_no: '',
+  amount_paid: '',
+  reason: '',
+  remarks: '',
+  comments: '',
+  estate_id: '',
+};
+
 export default function CooLogTab() {
   const { profile } = useAuth();
   const [rows, setRows] = useState([]);
@@ -147,8 +158,14 @@ export default function CooLogTab() {
   const [estateFilter, setEstateFilter] = useState('');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
-  const [importStep, setImportStep] = useState(null); // null | 'estate' | 'file'
+  const [importStep, setImportStep] = useState(null);
   const [importEstateId, setImportEstateId] = useState('');
+  const [selected, setSelected] = useState(() => new Set());
+  const [busy, setBusy] = useState(false);
+  const [detail, setDetail] = useState(null); // row opened
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState(EDIT_BLANK);
+  const [error, setError] = useState('');
 
   useEffect(() => { load(); }, []);
 
@@ -161,6 +178,7 @@ export default function CooLogTab() {
       .select('*, offers(estate_id, estates(name)), allocation_records(estate_id, estates(name)), estates(name)')
       .order('created_at', { ascending: false });
     setRows(data || []);
+    setSelected(new Set());
     setLoading(false);
   }
 
@@ -187,18 +205,106 @@ export default function CooLogTab() {
     [filtered]
   );
 
+  function toggleOne(id) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAllVisible() {
+    if (selected.size && filtered.every((r) => selected.has(r.id))) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(filtered.map((r) => r.id)));
+    }
+  }
+
+  async function deleteIds(ids) {
+    if (!ids.length) return;
+    const msg = ids.length === 1
+      ? 'Delete this COO record permanently?'
+      : `Delete ${ids.length} selected COO record(s) permanently?`;
+    if (!confirm(msg)) return;
+    setBusy(true);
+    const { error: err } = await supabase.from('ownership_changes').delete().in('id', ids);
+    setBusy(false);
+    if (err) { alert(err.message); return; }
+    setDetail(null);
+    setEditing(false);
+    load();
+  }
+
+  function openDetail(r) {
+    setDetail(r);
+    setEditing(false);
+    setError('');
+    setForm({
+      previous_owner: r.previous_owner || '',
+      new_owner: r.new_owner || '',
+      date_changed: r.date_changed ? String(r.date_changed).slice(0, 10) : '',
+      property_type: r.property_type || '',
+      status: r.status || '',
+      new_allocation_no: r.new_allocation_no || r.new_pon || '',
+      amount_paid: r.amount_paid ?? '',
+      reason: r.reason || '',
+      remarks: r.remarks || '',
+      comments: r.comments || '',
+      estate_id: estateIdOf(r) || '',
+    });
+  }
+
+  async function saveEdit(e) {
+    e.preventDefault();
+    if (!detail) return;
+    if (!form.previous_owner.trim() || !form.new_owner.trim()) {
+      setError('Previous and new owner names are required.');
+      return;
+    }
+    setBusy(true);
+    const payload = {
+      previous_owner: form.previous_owner.trim(),
+      new_owner: form.new_owner.trim(),
+      date_changed: form.date_changed || new Date().toISOString().slice(0, 10),
+      property_type: form.property_type || null,
+      status: form.status || null,
+      new_allocation_no: form.new_allocation_no || null,
+      amount_paid: Number(form.amount_paid) || 0,
+      reason: form.reason || null,
+      remarks: form.remarks || null,
+      comments: form.comments || null,
+      estate_id: form.estate_id || null,
+    };
+    const { error: err } = await supabase.from('ownership_changes').update(payload).eq('id', detail.id);
+    setBusy(false);
+    if (err) { setError(err.message); return; }
+    setEditing(false);
+    setDetail(null);
+    load();
+  }
+
   return (
     <div>
       <div className="page-title">
         <div>
           <h2>Change of Ownership — History</h2>
           <p className="muted" style={{ margin: 0 }}>
-            Import from Excel (one sheet per estate) or record COO from Allocations / Offers.
+            Click a row to open details. Edit or delete at the bottom of the detail panel.
           </p>
         </div>
         <div className="flex wrap">
           <Link className="btn btn-outline" to="/offers">Offers</Link>
           <Link className="btn btn-outline" to="/allocations">Allocations</Link>
+          <button
+            type="button"
+            className="btn btn-danger"
+            disabled={busy || selected.size === 0}
+            onClick={() => deleteIds([...selected])}
+          >
+            Delete selected ({selected.size})
+          </button>
           <button
             type="button"
             className="btn btn-primary"
@@ -248,6 +354,15 @@ export default function CooLogTab() {
           <table>
             <thead>
               <tr>
+                <th style={{ width: 36 }}>
+                  <input
+                    type="checkbox"
+                    checked={filtered.length > 0 && filtered.every((r) => selected.has(r.id))}
+                    onChange={toggleAllVisible}
+                    title="Select all visible"
+                  />
+                </th>
+                <th>S/N</th>
                 <th>Date</th>
                 <th>Estate</th>
                 <th>Previous Owner</th>
@@ -256,18 +371,33 @@ export default function CooLogTab() {
                 <th>House / Allocation</th>
                 <th>Status</th>
                 <th className="right">COO Fee (₦)</th>
-                <th>Remarks / Comments</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map((r) => (
-                <tr key={r.id}>
+              {filtered.map((r, i) => (
+                <tr
+                  key={r.id}
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => openDetail(r)}
+                >
+                  <td onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={selected.has(r.id)}
+                      onChange={() => toggleOne(r.id)}
+                    />
+                  </td>
+                  <td>{i + 1}</td>
                   <td>{r.date_changed || '—'}</td>
                   <td>{estateOf(r)}</td>
                   <td>{r.previous_owner}</td>
                   <td>
                     {estateIdOf(r) ? (
-                      <Link to={`/subscriber/${estateIdOf(r)}/${encodeURIComponent(r.new_owner)}`}>
+                      <Link
+                        to={`/subscriber/${estateIdOf(r)}/${encodeURIComponent(r.new_owner)}`}
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         {r.new_owner}
                       </Link>
                     ) : r.new_owner}
@@ -276,12 +406,17 @@ export default function CooLogTab() {
                   <td>{r.new_pon || r.new_allocation_no || '—'}</td>
                   <td>{r.status || '—'}</td>
                   <td className="right">{Number(r.amount_paid || 0).toLocaleString()}</td>
-                  <td>{[r.remarks, r.comments].filter(Boolean).join(' · ') || '—'}</td>
+                  <td onClick={(e) => e.stopPropagation()}>
+                    <div className="flex">
+                      <button type="button" className="btn btn-outline btn-sm" onClick={() => openDetail(r)}>Open</button>
+                      <button type="button" className="btn btn-danger btn-sm" disabled={busy} onClick={() => deleteIds([r.id])}>Delete</button>
+                    </div>
+                  </td>
                 </tr>
               ))}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="empty-state">
+                  <td colSpan={11} className="empty-state">
                     No ownership changes yet. Use <b>Bulk Import COO</b> or <b>Record COO</b> on an allocation.
                   </td>
                 </tr>
@@ -290,6 +425,102 @@ export default function CooLogTab() {
           </table>
         )}
       </div>
+
+      {detail && (
+        <div className="modal-overlay" onClick={() => { if (!busy) { setDetail(null); setEditing(false); } }}>
+          <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
+            <h3>COO record</h3>
+            {!editing ? (
+              <>
+                <div className="grid cols-2">
+                  <p><b>Date:</b> {detail.date_changed || '—'}</p>
+                  <p><b>Estate:</b> {estateOf(detail)}</p>
+                  <p><b>Previous owner:</b> {detail.previous_owner}</p>
+                  <p><b>New owner:</b> {detail.new_owner}</p>
+                  <p><b>Property type:</b> {detail.property_type || '—'}</p>
+                  <p><b>House / Allocation:</b> {detail.new_pon || detail.new_allocation_no || '—'}</p>
+                  <p><b>Status:</b> {detail.status || '—'}</p>
+                  <p><b>COO fee:</b> ₦{Number(detail.amount_paid || 0).toLocaleString()}</p>
+                  <p><b>Reason:</b> {detail.reason || '—'}</p>
+                  <p><b>Remarks:</b> {detail.remarks || '—'}</p>
+                  <p style={{ gridColumn: '1 / -1' }}><b>Comments:</b> {detail.comments || '—'}</p>
+                </div>
+                <div className="modal-actions" style={{ marginTop: 16, justify: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+                  <button type="button" className="btn btn-danger" disabled={busy} onClick={() => deleteIds([detail.id])}>
+                    Delete this record
+                  </button>
+                  <div className="flex">
+                    <button type="button" className="btn btn-outline" onClick={() => { setDetail(null); setEditing(false); }}>Close</button>
+                    <button type="button" className="btn btn-primary" onClick={() => setEditing(true)}>Edit</button>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <form onSubmit={saveEdit}>
+                <div className="grid cols-2">
+                  <div className="field">
+                    <label>Previous owner *</label>
+                    <input value={form.previous_owner} onChange={(e) => setForm({ ...form, previous_owner: e.target.value })} required />
+                  </div>
+                  <div className="field">
+                    <label>New owner *</label>
+                    <input value={form.new_owner} onChange={(e) => setForm({ ...form, new_owner: e.target.value })} required />
+                  </div>
+                  <div className="field">
+                    <label>Date processed</label>
+                    <input type="date" value={form.date_changed} onChange={(e) => setForm({ ...form, date_changed: e.target.value })} />
+                  </div>
+                  <div className="field">
+                    <label>Estate</label>
+                    <select value={form.estate_id} onChange={(e) => setForm({ ...form, estate_id: e.target.value })}>
+                      <option value="">—</option>
+                      {estates.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label>Property type</label>
+                    <input value={form.property_type} onChange={(e) => setForm({ ...form, property_type: e.target.value })} />
+                  </div>
+                  <div className="field">
+                    <label>House / Allocation</label>
+                    <input value={form.new_allocation_no} onChange={(e) => setForm({ ...form, new_allocation_no: e.target.value })} />
+                  </div>
+                  <div className="field">
+                    <label>Status</label>
+                    <input value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })} placeholder="ongoing / done" />
+                  </div>
+                  <div className="field">
+                    <label>COO fee (₦)</label>
+                    <input type="number" value={form.amount_paid} onChange={(e) => setForm({ ...form, amount_paid: e.target.value })} />
+                  </div>
+                  <div className="field" style={{ gridColumn: '1 / -1' }}>
+                    <label>Reason</label>
+                    <input value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} />
+                  </div>
+                  <div className="field">
+                    <label>Remarks</label>
+                    <input value={form.remarks} onChange={(e) => setForm({ ...form, remarks: e.target.value })} />
+                  </div>
+                  <div className="field">
+                    <label>Comments</label>
+                    <input value={form.comments} onChange={(e) => setForm({ ...form, comments: e.target.value })} />
+                  </div>
+                </div>
+                {error && <div className="error-text">{error}</div>}
+                <div className="modal-actions" style={{ marginTop: 16, justify: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+                  <button type="button" className="btn btn-danger" disabled={busy} onClick={() => deleteIds([detail.id])}>
+                    Delete this record
+                  </button>
+                  <div className="flex">
+                    <button type="button" className="btn btn-outline" onClick={() => setEditing(false)}>Cancel edit</button>
+                    <button type="submit" className="btn btn-primary" disabled={busy}>{busy ? 'Saving…' : 'Save changes'}</button>
+                  </div>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
 
       {importStep === 'estate' && (
         <div className="modal-overlay" onClick={() => setImportStep(null)}>
@@ -341,4 +572,3 @@ export default function CooLogTab() {
     </div>
   );
 }
-

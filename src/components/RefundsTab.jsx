@@ -674,11 +674,24 @@ export default function RefundsTab() {
                   title="Refund documents"
                 />
               )}
-<div className="modal-actions">
-                <button type="button" className="btn btn-outline" onClick={() => setShowModal(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary" disabled={saving}>
-                  {saving ? 'Saving…' : 'Save'}
-                </button>
+<div className="modal-actions" style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+                <div>
+                  {editingRow && (
+                    <button
+                      type="button"
+                      className="btn btn-danger"
+                      onClick={() => { setShowModal(false); handleDelete(editingRow); }}
+                    >
+                      Delete this record
+                    </button>
+                  )}
+                </div>
+                <div className="flex">
+                  <button type="button" className="btn btn-outline" onClick={() => setShowModal(false)}>Cancel</button>
+                  <button type="submit" className="btn btn-primary" disabled={saving}>
+                    {saving ? 'Saving…' : 'Save'}
+                  </button>
+                </div>
               </div>
             </form>
           </div>
