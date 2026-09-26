@@ -299,7 +299,7 @@ export default function BulkImportModal({ title, tableName, fieldDefs, estates =
           if (batch.length < pageSize) break;
           from += pageSize;
         }
-      } else if (estateId && ['payments', 'offers', 'allocation_records', 'refunds', 'ownership_changes'].includes(tableName)) {
+      } else if (estateId && ['payments', 'offers', 'allocation_records', 'refunds', 'ownership_changes', 'contract_awards'].includes(tableName)) {
         let q = supabase.from(tableName).select('*');
         if (tableName === 'ownership_changes') {
           q = q.eq('estate_id', estateId);

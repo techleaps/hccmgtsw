@@ -60,6 +60,14 @@ export function recordFingerprint(tableName, rec) {
         normalizePersonName(rec.subscriber_name),
         num(rec.amount_approved ?? rec.amount),
       ].join('|');
+    case 'contract_awards':
+      return [
+        String(rec.contractor_name || '').trim().toLowerCase(),
+        String(rec.description || '').trim().toLowerCase(),
+        num(rec.amount_approved ?? rec.amount_given ?? rec.contract_amount),
+        dateKey(rec.approval_date ?? rec.award_date),
+        String(rec.award_category || ''),
+      ].join('|');
     case 'ownership_changes':
       return [
         normalizePersonName(rec.previous_owner),
