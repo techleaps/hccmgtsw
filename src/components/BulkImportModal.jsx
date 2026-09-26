@@ -119,7 +119,9 @@ function looksLikeJunkRow(record, requiredKey, knownEstateNames) {
 }
 
 export default function BulkImportModal({ title, tableName, fieldDefs, estates = [], presetEstateId, onClose, onImported, profile, transformRecord }) {
-  const [step, setStep] = useState(presetEstateId ? 'upload' : 'estate');
+  const [step, setStep] = useState(
+    presetEstateId || tableName === 'approvals_expenditures' ? 'upload' : 'estate'
+  );
   const [estateId, setEstateId] = useState(presetEstateId || '');
   const [defaultPropertyType, setDefaultPropertyType] = useState('');
   const [fileName, setFileName] = useState('');
@@ -449,7 +451,7 @@ export default function BulkImportModal({ title, tableName, fieldDefs, estates =
             <div className="field">
               <label>Select Estate</label>
               <select value={estateId} onChange={(e) => setEstateId(e.target.value)}>
-                <option value="">Select estate…</option>
+                <option value="">{tableName === 'approvals_expenditures' ? '— None (not tied to an estate) —' : 'Select estate…'}</option>
                 {estates.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
               </select>
               {estates.length === 0 && (

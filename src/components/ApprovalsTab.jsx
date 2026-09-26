@@ -119,19 +119,70 @@ export function expenseFieldDefs(category) {
   return common;
 }
 
-function transformExpenseRecord(r, category) {
+/** Match Excel Site / location text to an estate id when possible */
+function matchEstateFromSite(siteText, estates) {
+  const raw = String(siteText || '').trim();
+  if (!raw || !estates?.length) return null;
+  const s = raw.toLowerCase().replace(/\s+/g, ' ');
+  // Direct / contains match on estate name
+  for (const e of estates) {
+    const n = String(e.name || '').toLowerCase();
+    if (!n) continue;
+    if (n === s || n.includes(s) || s.includes(n)) return e.id;
+  }
+  // Common short place names → keywords in estate names
+  const tokens = s.split(/[^a-z0-9]+/).filter((t) => t.length >= 2);
+  const aliases = {
+    ph: ['port', 'pharcourt', 'portharcourt', 'treasure'],
+    portharcourt: ['port', 'treasure'],
+    'port harcourt': ['port', 'treasure'],
+    enugu: ['enugu', 'valley', 'transekulu'],
+    abuja: ['abuja', 'iad', 'id u', 'idu', 'kuje', 'bwari', 'asokoro', 'guzape', 'falcon'],
+    idu: ['idu', 'ville'],
+    kuje: ['kuje', 'unity'],
+    bwari: ['bwari', 'bungalow', 'eagle'],
+    awka: ['awka', 'anambra', 'green'],
+    anambra: ['anambra', 'awka', 'green'],
+    asokoro: ['asokoro', 'sunny'],
+    guzape: ['guzape', 'dubai'],
+    falcon: ['falcon'],
+    iad: ['iad', 'aviation'],
+  };
+  for (const [key, words] of Object.entries(aliases)) {
+    if (s === key || s.includes(key) || tokens.includes(key)) {
+      for (const e of estates) {
+        const n = String(e.name || '').toLowerCase();
+        if (words.some((w) => n.includes(w))) return e.id;
+      }
+    }
+  }
+  // Single-token overlap with estate name
+  for (const e of estates) {
+    const n = String(e.name || '').toLowerCase();
+    if (tokens.some((t) => t.length >= 3 && n.includes(t))) return e.id;
+  }
+  return null;
+}
+
+function transformExpenseRecord(r, category, estates, forcedEstateId) {
   const amountApproved = Number(r.amount_approved) || 0;
   const amountApplied = Number(r.amount_applied) || amountApproved;
   const title = String(r.title || '').trim() || 'Untitled';
   const cat = category || r.category || 'Others';
   const expense_group = classifyExpenseGroup(title, cat, r.expense_group);
+  const site = (r.site || '').trim() || null;
+  // Forced estate only if user chose one; else try Site column; else leave null (company-wide)
+  let estate_id = forcedEstateId || r.estate_id || null;
+  if (!estate_id && site) {
+    estate_id = matchEstateFromSite(site, estates);
+  }
   return {
     title,
     purpose: r.purpose || r.request_ref || null,
     category: cat,
     expense_group,
     month_label: (r.month_label || '').trim() || null,
-    site: (r.site || '').trim() || null,
+    site,
     request_ref: (r.request_ref || '').trim() || null,
     amount_applied: amountApplied,
     amount_approved: amountApproved,
@@ -139,7 +190,7 @@ function transformExpenseRecord(r, category) {
     date_of_approval: r.date_of_approval || null,
     comments: r.comments || null,
     remarks: r.remarks || null,
-    estate_id: r.estate_id || null,
+    estate_id: estate_id || null,
   };
 }
 
@@ -866,7 +917,11 @@ export default function ApprovalsTab() {
         <div className="modal-overlay" onClick={() => setShowImport(false)}>
           <div className="modal" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>
             <h3>Bulk import expenditure</h3>
-            <p className="muted">Choose the sheet type so rows are tagged correctly (RCA, DTA, Salary, Others).</p>
+            <p className="muted">
+              Choose the category for this file. <b>Estate is optional</b> — leave blank for company-wide items
+              (site allowance, salary, travel). For RCA/guards, if the Excel has a <b>Site</b> column
+              (Abuja, Enugu, Idu…), the system will try to link each row to the matching estate automatically.
+            </p>
             <div className="field">
               <label>Category for this file *</label>
               <select value={importCategory} onChange={(e) => setImportCategory(e.target.value)}>
@@ -874,11 +929,14 @@ export default function ApprovalsTab() {
               </select>
             </div>
             <div className="field">
-              <label>Optional: link all rows to one estate</label>
+              <label>Optional: force all rows onto one estate</label>
               <select value={importEstateId} onChange={(e) => setImportEstateId(e.target.value)}>
-                <option value="">— None (site column only) —</option>
+                <option value="">— None (recommended) — use Site column or leave unlinked —</option>
                 {estates.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
               </select>
+              <p className="muted" style={{ margin: '6px 0 0', fontSize: 12 }}>
+                Site allowance / salary / DTA: keep <b>None</b>. RCA with Site in Excel: keep <b>None</b> so each row links from Site. Only force an estate if the whole file is truly for one estate and Site is empty.
+              </p>
             </div>
             <div className="modal-actions">
               <button type="button" className="btn btn-outline" onClick={() => setShowImport(false)}>Cancel</button>
@@ -908,8 +966,7 @@ export default function ApprovalsTab() {
           onClose={() => setShowImport(false)}
           onImported={() => { setShowImport(false); load(); }}
           transformRecord={(r) => ({
-            ...transformExpenseRecord(r, importCategory),
-            estate_id: importEstateId || r.estate_id || null,
+            ...transformExpenseRecord(r, importCategory, estates, importEstateId || null),
             created_by: profile?.id,
           })}
         />
