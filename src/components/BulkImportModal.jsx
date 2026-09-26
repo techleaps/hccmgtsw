@@ -271,7 +271,19 @@ export default function BulkImportModal({ title, tableName, fieldDefs, estates =
     // Load existing rows for this estate and skip fingerprints already in DB
     let existingFp = new Set();
     try {
-      if (estateId && ['payments', 'offers', 'allocation_records', 'refunds', 'ownership_changes'].includes(tableName)) {
+      if (tableName === 'approvals_expenditures') {
+        let q = supabase.from(tableName).select('*').eq('is_deleted', false);
+        const pageSize = 1000;
+        let from = 0;
+        for (;;) {
+          const { data, error } = await q.range(from, from + pageSize - 1);
+          if (error) break;
+          const batch = data || [];
+          batch.forEach((row) => existingFp.add(recordFingerprint(tableName, row)));
+          if (batch.length < pageSize) break;
+          from += pageSize;
+        }
+      } else if (estateId && ['payments', 'offers', 'allocation_records', 'refunds', 'ownership_changes'].includes(tableName)) {
         let q = supabase.from(tableName).select('*');
         if (tableName === 'ownership_changes') {
           q = q.eq('estate_id', estateId);
@@ -390,7 +402,7 @@ export default function BulkImportModal({ title, tableName, fieldDefs, estates =
     for (let i = 0; i < toImport.length; i += CHUNK) {
       const chunk = toImport.slice(i, i + CHUNK).map((r) => ({
         ...r,
-        estate_id: estateId,
+        estate_id: estateId || null,
         created_by: profile.id,
       }));
       const { error: insertError } = await supabase.from(tableName).insert(chunk);
@@ -432,7 +444,14 @@ export default function BulkImportModal({ title, tableName, fieldDefs, estates =
             </div>
             <div className="modal-actions">
               <button type="button" className="btn btn-outline" onClick={onClose}>Cancel</button>
-              <button type="button" className="btn btn-primary" disabled={!estateId} onClick={() => setStep('upload')}>Next</button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={tableName !== 'approvals_expenditures' && !estateId}
+                onClick={() => setStep('upload')}
+              >
+                Next
+              </button>
             </div>
           </div>
         )}

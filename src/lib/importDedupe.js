@@ -39,6 +39,15 @@ export function recordFingerprint(tableName, rec) {
         clean(rec.house_no),
         clean(rec.property_type),
       ].join('|');
+    case 'approvals_expenditures':
+      return [
+        String(rec.title || '').trim().toLowerCase(),
+        num(rec.amount_approved),
+        dateKey(rec.date_of_approval),
+        String(rec.category || ''),
+        String(rec.month_label || ''),
+        String(rec.site || ''),
+      ].join('|');
     case 'refunds':
       return [
         normalizePersonName(rec.subscriber_name),
