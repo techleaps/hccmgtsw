@@ -423,7 +423,8 @@ export default function ContractAwardsTab() {
         <div>
           <h2>Award of Contract</h2>
           <p className="muted" style={{ margin: 0 }}>
-            Construction milestones, roofing, variation, infrastructure, deeds, discounts — import per estate.
+            Contractor / contract register (who was awarded what). Approved <b>payments</b> for those contracts
+            are recorded under <b>Approvals / Expenditure → Award of Contract</b>.
           </p>
         </div>
         <div className="flex wrap">

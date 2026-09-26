@@ -19,6 +19,7 @@ const CATEGORIES = [
   { key: 'DTA', label: 'DTA / LT&T / Flight / Contingency (travel)' },
   { key: 'Site Allowance', label: 'Site Allowance (staff stipend — seconded staff)' },
   { key: 'Salary', label: 'Salary (permanent staff only)' },
+  { key: 'Award of Contract', label: 'Award of Contract (approved contract payments)' },
   { key: 'Others', label: 'Others (fuel, PMS, AGO, recharge, etc.)' },
 ];
 
@@ -49,7 +50,19 @@ export function expenseFieldDefs(category) {
       label: 'Description',
       type: 'text',
       required: true,
-      synonyms: ['description', 'title', 'particulars', 'item', 'details'],
+      synonyms: [
+        'description', 'title', 'particulars', 'item', 'details',
+        'work description', 'contract description',
+      ],
+    },
+    {
+      key: 'purpose',
+      label: 'Contractor / Portfolio / Payment note',
+      type: 'text',
+      synonyms: [
+        'contractor', 'contractor name', 'portfolio', 'portforlio',
+        'payment made', 'reason', 'beneficiary', 'applicant',
+      ],
     },
     {
       key: 'expense_group',
@@ -189,6 +202,7 @@ function normalizeMainCategory(raw, fallback) {
   if (s === 'rca' || s.includes('guard') || s.includes('security')) return 'RCA';
   if (s === 'dta' || s.includes('flight') || s.includes('travel') || s.includes('lt&t')) return 'DTA';
   if (s.includes('salary') || s.includes('payroll') || s.includes('unestablished')) return 'Salary';
+  if (s.includes('award') || s.includes('contract') || s.includes('milestone') || s.includes('variation') || s.includes('roofing') || s.includes('infrastructure')) return 'Award of Contract';
   if (s.includes('other')) return 'Others';
   // If Excel "category" is a sub-type (recharge, pms), keep main as fallback (usually Others)
   return fallback;
@@ -214,7 +228,7 @@ function transformExpenseRecord(r, category, estates, forcedEstateId) {
   }
   return {
     title,
-    purpose: r.purpose || r.request_ref || null,
+    purpose: r.purpose || r.request_ref || null, // contractor / portfolio text when imported under Award of Contract
     category: cat,
     expense_group,
     month_label: (r.month_label || '').trim() || null,
@@ -539,7 +553,8 @@ export default function ApprovalsTab() {
         <div>
           <h2>Approvals / Expenditure</h2>
           <p className="muted" style={{ margin: 0 }}>
-            RCA, DTA (travel), Site Allowance (staff stipend), Salary (permanent), Others — import by category. Totals update with filters.
+            RCA, DTA, Site Allowance, Salary, <b>Award of Contract</b> (approved payments), Others — import by category.
+            Contractor register (who was awarded what) is under the main menu <b>Award of Contract</b>; money approvals go here.
           </p>
         </div>
         <div className="flex wrap">
@@ -954,7 +969,9 @@ export default function ApprovalsTab() {
           <div className="modal" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>
             <h3>Bulk import expenditure</h3>
             <p className="muted">
-              Choose the category for this file. <b>Estate is optional</b> — leave blank for company-wide items
+              Choose the category for this file — including <b>Award of Contract</b> for approved contract payments
+              (milestones, roofing, variation, infrastructure, deeds, commissions).
+              <b>Estate is optional</b> — leave blank for company-wide items
               (site allowance, salary, travel). For RCA/guards, if the Excel has a <b>Site</b> column
               (Abuja, Enugu, Idu…), the system will try to link each row to the matching estate automatically.
             </p>

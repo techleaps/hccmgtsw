@@ -5,6 +5,33 @@
 
 const RULES = [
   {
+    group: 'Construction milestones',
+    patterns: [
+      /milestone/i, /\b3br\b/i, /\b2br\b/i, /\b4br\b/i, /terrace/i, /fully\s*det/i,
+      /semi\s*det/i, /construction\s+of/i,
+    ],
+  },
+  {
+    group: 'Roofing contracts',
+    patterns: [/\broofing\b/i, /aluminium/i, /aluminum/i],
+  },
+  {
+    group: 'Contract variations',
+    patterns: [/\bvariation\b/i, /\bboq\b/i, /plinth\s*beam/i, /ground\s*beam/i],
+  },
+  {
+    group: 'Infrastructure works',
+    patterns: [/\binfrastructure\b/i, /\basphalt\b/i, /\bfenc/i, /\bculvert\b/i, /\bbridge\b/i, /road\s*network/i],
+  },
+  {
+    group: 'Deed of assignment',
+    patterns: [/deed\s+of\s+assignment/i, /registration\s+of\s+(deed|agreement)/i],
+  },
+  {
+    group: 'Sales commission / discount',
+    patterns: [/sales\s*commission/i, /sales\s*discount/i, /commission/i],
+  },
+  {
     group: 'Site allowance (staff stipend)',
     patterns: [
       /site\s*all(?:owance|ce)/i,
@@ -132,6 +159,7 @@ export function classifyExpenseGroup(title, category, manualGroup) {
   if (cat === 'DTA') return 'DTA / travel / flights';
   if (cat === 'Salary') return 'Salary / staff pay';
   if (cat === 'Site Allowance') return 'Site allowance (staff stipend)';
+  if (cat === 'Award of Contract') return 'Award of Contract (payments)';
 
   const text = String(title || '');
   for (const rule of RULES) {
