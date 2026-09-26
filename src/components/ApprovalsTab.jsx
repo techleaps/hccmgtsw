@@ -8,6 +8,11 @@ import DocumentAttachments from './DocumentAttachments';
 import ManageColumnsModal from './ManageColumnsModal';
 import BulkImportModal from './BulkImportModal';
 import { CustomFieldInputs, CustomFieldHeaders, CustomFieldCells } from './CustomFieldWidgets';
+import {
+  classifyExpenseGroup,
+  groupExpensesByType,
+  knownExpenseGroups,
+} from '../lib/expenseGrouping';
 
 const CATEGORIES = [
   { key: 'RCA', label: 'RCA (guards / estate security)' },
@@ -32,6 +37,7 @@ const BLANK = {
   date_of_approval: '',
   comments: '',
   remarks: '',
+  expense_group: '',
 };
 
 /** Shared + category-specific Excel column synonyms */
@@ -115,10 +121,14 @@ export function expenseFieldDefs(category) {
 function transformExpenseRecord(r, category) {
   const amountApproved = Number(r.amount_approved) || 0;
   const amountApplied = Number(r.amount_applied) || amountApproved;
+  const title = String(r.title || '').trim() || 'Untitled';
+  const cat = category || r.category || 'Others';
+  const expense_group = classifyExpenseGroup(title, cat, r.expense_group);
   return {
-    title: String(r.title || '').trim() || 'Untitled',
+    title,
     purpose: r.purpose || r.request_ref || null,
-    category: category || r.category || 'Others',
+    category: cat,
+    expense_group,
     month_label: (r.month_label || '').trim() || null,
     site: (r.site || '').trim() || null,
     request_ref: (r.request_ref || '').trim() || null,
@@ -141,6 +151,7 @@ export default function ApprovalsTab() {
   const [estateFilter, setEstateFilter] = useState('');
   const [monthFilter, setMonthFilter] = useState('');
   const [siteFilter, setSiteFilter] = useState('');
+  const [groupFilter, setGroupFilter] = useState('');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -185,14 +196,28 @@ export default function ApprovalsTab() {
     return [...set].sort();
   }, [rows]);
 
-  const filtered = useMemo(() => rows.filter((r) => {
+  const rowsWithGroup = useMemo(() => rows.map((r) => ({
+    ...r,
+    _group: r.expense_group || classifyExpenseGroup(r.title, r.category, null),
+  })), [rows]);
+
+  const filtered = useMemo(() => rowsWithGroup.filter((r) => {
     if (categoryFilter && (r.category || '') !== categoryFilter) return false;
     if (estateFilter && r.estate_id !== estateFilter) return false;
     if (monthFilter && (r.month_label || '') !== monthFilter) return false;
     if (siteFilter && (r.site || '') !== siteFilter) return false;
-    const hay = `${r.title || ''} ${r.purpose || ''} ${r.request_ref || ''} ${r.site || ''} ${r.remarks || ''}`.toLowerCase();
+    if (groupFilter && (r._group || '') !== groupFilter) return false;
+    const hay = `${r.title || ''} ${r.purpose || ''} ${r.request_ref || ''} ${r.site || ''} ${r.remarks || ''} ${r._group || ''}`.toLowerCase();
     return hay.includes(search.toLowerCase());
-  }), [rows, categoryFilter, estateFilter, monthFilter, siteFilter, search]);
+  }), [rowsWithGroup, categoryFilter, estateFilter, monthFilter, siteFilter, groupFilter, search]);
+
+  const byExpenseGroup = useMemo(() => groupExpensesByType(filtered), [filtered]);
+
+  const allGroups = useMemo(() => {
+    const set = new Set(knownExpenseGroups());
+    rowsWithGroup.forEach((r) => { if (r._group) set.add(r._group); });
+    return [...set].sort();
+  }, [rowsWithGroup]);
 
   const totals = useMemo(() => {
     let applied = 0;
@@ -266,6 +291,7 @@ export default function ApprovalsTab() {
       date_of_approval: row.date_of_approval ? String(row.date_of_approval).slice(0, 10) : '',
       comments: row.comments || '',
       remarks: row.remarks || '',
+      expense_group: row.expense_group || classifyExpenseGroup(row.title, row.category, null),
     });
     setCustomData(row.custom_data || {});
     setError('');
@@ -277,8 +303,11 @@ export default function ApprovalsTab() {
     setError('');
     if (!form.title.trim()) { setError('Description is required.'); return; }
     setSaving(true);
+    const autoGroup = form.expense_group?.trim()
+      || classifyExpenseGroup(form.title, form.category, null);
     const payload = blankToNull({
       ...form,
+      expense_group: autoGroup,
       estate_id: form.estate_id || null,
       amount_applied: Number(form.amount_applied) || 0,
       amount_approved: Number(form.amount_approved) || 0,
@@ -349,6 +378,26 @@ export default function ApprovalsTab() {
     load();
   }
 
+  async function handleReclassifyAll() {
+    if (!confirm(
+      'Re-run smart grouping on all expenditure rows? Descriptions are scanned (recharge, PMS, AGO, etc.) and expense_group is updated. Manual groups are overwritten.'
+    )) return;
+    setBulkBusy(true);
+    let done = 0;
+    for (const r of rows) {
+      const g = classifyExpenseGroup(r.title, r.category, null);
+      if (g === (r.expense_group || '')) continue;
+      const { error: err } = await supabase
+        .from('approvals_expenditures')
+        .update({ expense_group: g })
+        .eq('id', r.id);
+      if (!err) done += 1;
+    }
+    setBulkBusy(false);
+    alert(`Updated group on ${done} record(s).`);
+    load();
+  }
+
   return (
     <div>
       <div className="page-title">
@@ -379,6 +428,9 @@ export default function ApprovalsTab() {
           >
             Delete selected ({selected.size})
           </button>
+          <button type="button" className="btn btn-outline" onClick={handleReclassifyAll} disabled={bulkBusy || !rows.length}>
+            Re-classify groups
+          </button>
           <button type="button" className="btn btn-primary" onClick={openNew}>+ New Entry</button>
         </div>
       </div>
@@ -395,6 +447,49 @@ export default function ApprovalsTab() {
         <div className="stat-card gold">
           <div className="value">₦{totals.approved.toLocaleString()}</div>
           <div className="label">Total Approved</div>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 16 }}>
+        <h3 style={{ marginTop: 0 }}>Spend by type (smart groups)</h3>
+        <p className="muted" style={{ marginTop: 0 }}>
+          Recurring items (recharge cards, PMS, AGO, etc.) are grouped from the description so you can filter
+          e.g. “how much on recharge over several months”. Use <b>Re-classify groups</b> after import if needed.
+        </p>
+        <div className="table-wrap" style={{ maxHeight: 280, overflow: 'auto' }}>
+          <table>
+            <thead>
+              <tr>
+                <th>Expense type</th>
+                <th className="right">Entries</th>
+                <th className="right">Months</th>
+                <th className="right">Approved (₦)</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {byExpenseGroup.map((g) => (
+                <tr key={g.name}>
+                  <td><b>{g.name}</b></td>
+                  <td className="right">{g.count}</td>
+                  <td className="right">{g.monthCount || g.months?.length || 0}</td>
+                  <td className="right">{g.approved.toLocaleString()}</td>
+                  <td>
+                    <button
+                      type="button"
+                      className="btn btn-outline btn-sm"
+                      onClick={() => setGroupFilter(g.name)}
+                    >
+                      Filter
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {byExpenseGroup.length === 0 && (
+                <tr><td colSpan={5} className="empty-state">No data in current filters</td></tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -483,6 +578,13 @@ export default function ApprovalsTab() {
               {sites.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
+          <div style={{ minWidth: 200 }}>
+            <label>Expense type (group)</label>
+            <select value={groupFilter} onChange={(e) => setGroupFilter(e.target.value)}>
+              <option value="">All types</option>
+              {allGroups.map((g) => <option key={g} value={g}>{g}</option>)}
+            </select>
+          </div>
           <div style={{ minWidth: 200, flex: 1 }}>
             <label>Search</label>
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Description, ref, site…" />
@@ -504,6 +606,7 @@ export default function ApprovalsTab() {
                 </th>
                 <th>S/N</th>
                 <th>Category</th>
+                <th>Type / group</th>
                 <th>Description</th>
                 <th>Month</th>
                 <th>Site</th>
@@ -524,6 +627,7 @@ export default function ApprovalsTab() {
                   </td>
                   <td>{r.serial_no ?? i + 1}</td>
                   <td><span className="tag PO">{r.category || '—'}</span></td>
+                  <td style={{ fontSize: 12 }}>{r._group || '—'}</td>
                   <td>{r.title}</td>
                   <td>{r.month_label || '—'}</td>
                   <td>{r.site || '—'}</td>
@@ -581,6 +685,18 @@ export default function ApprovalsTab() {
                   <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
                     {CATEGORIES.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
                   </select>
+                </div>
+                <div className="field">
+                  <label>Expense type / group</label>
+                  <input
+                    list="expense-group-list"
+                    value={form.expense_group}
+                    onChange={(e) => setForm({ ...form, expense_group: e.target.value })}
+                    placeholder="Auto from description, or type e.g. Recharge cards"
+                  />
+                  <datalist id="expense-group-list">
+                    {knownExpenseGroups().map((g) => <option key={g} value={g} />)}
+                  </datalist>
                 </div>
                 <div className="field">
                   <label>Link to estate (optional)</label>

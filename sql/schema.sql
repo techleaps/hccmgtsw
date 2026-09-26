@@ -210,6 +210,7 @@ create table if not exists approvals_expenditures (
   month_label text,
   site text,
   request_ref text,
+  expense_group text,
   comments text,
   remarks text,
   custom_data jsonb not null default '{}'::jsonb,
