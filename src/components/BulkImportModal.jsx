@@ -268,6 +268,22 @@ export default function BulkImportModal({ title, tableName, fieldDefs, estates =
       } else seen.set(n, i);
     });
 
+    // Expenditure: same description + amount in this file
+    if (tableName === 'approvals_expenditures') {
+      const seenExp = new Map();
+      allRecords.forEach((r, i) => {
+        const title = String(r.title || '').trim().toLowerCase();
+        const amt = Number(r.amount_approved || 0);
+        if (!title || !(amt > 0)) return;
+        const k = `${title}|${amt.toFixed(2)}`;
+        if (seenExp.has(k)) {
+          flags[i] = flags[i] || 'Same description+amount again in this file';
+          const j = seenExp.get(k);
+          flags[j] = flags[j] || 'Same description+amount again in this file';
+        } else seenExp.set(k, i);
+      });
+    }
+
     // Load existing rows for this estate and skip fingerprints already in DB
     let existingFp = new Set();
     try {

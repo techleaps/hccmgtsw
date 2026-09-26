@@ -213,6 +213,30 @@ export default function ApprovalsTab() {
 
   const byExpenseGroup = useMemo(() => groupExpensesByType(filtered), [filtered]);
 
+  /** Same description + same approved amount more than once (possible re-upload) */
+  const expenseDupes = useMemo(() => {
+    const map = new Map();
+    rows.forEach((r) => {
+      const title = String(r.title || '').trim().toLowerCase();
+      if (!title) return;
+      const amt = Number(r.amount_approved || 0);
+      if (!(amt > 0)) return;
+      const key = `${title}|${amt.toFixed(2)}`;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(r);
+    });
+    return [...map.entries()]
+      .map(([, list]) => ({
+        title: list[0].title,
+        amount: Number(list[0].amount_approved || 0),
+        list,
+        categories: [...new Set(list.map((x) => x.category || '—'))],
+        months: [...new Set(list.map((x) => x.month_label || '—').filter(Boolean))],
+      }))
+      .filter((g) => g.list.length > 1)
+      .sort((a, b) => b.list.length - a.list.length || b.amount - a.amount);
+  }, [rows]);
+
   const allGroups = useMemo(() => {
     const set = new Set(knownExpenseGroups());
     rowsWithGroup.forEach((r) => { if (r._group) set.add(r._group); });
@@ -449,6 +473,41 @@ export default function ApprovalsTab() {
           <div className="label">Total Approved</div>
         </div>
       </div>
+
+
+      {expenseDupes.length > 0 && (
+        <div className="card" style={{ borderLeft: '4px solid #dc2626', background: '#fef2f2', marginBottom: 16 }}>
+          <h3 style={{ marginTop: 0, color: '#991b1b' }}>Possible duplicate expenditure</h3>
+          <p className="muted">
+            Same description and same approved amount appear more than once (often from re-importing a file).
+            Review and use checkboxes + <b>Delete selected</b> to clean up.
+          </p>
+          <div className="table-wrap" style={{ maxHeight: 280, overflow: 'auto' }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Description</th>
+                  <th className="right">Amount (₦)</th>
+                  <th>Times</th>
+                  <th>Categories</th>
+                  <th>Months</th>
+                </tr>
+              </thead>
+              <tbody>
+                {expenseDupes.slice(0, 40).map((g, i) => (
+                  <tr key={i}>
+                    <td>{g.title}</td>
+                    <td className="right">{g.amount.toLocaleString()}</td>
+                    <td><span className="tag rejected">{g.list.length}×</span></td>
+                    <td>{g.categories.join(', ')}</td>
+                    <td>{g.months.join(', ') || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       <div className="card" style={{ marginBottom: 16 }}>
         <h3 style={{ marginTop: 0 }}>Spend by type (smart groups)</h3>
