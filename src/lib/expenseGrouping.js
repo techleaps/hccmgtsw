@@ -5,6 +5,17 @@
 
 const RULES = [
   {
+    group: 'Site allowance (staff stipend)',
+    patterns: [
+      /site\s*all(?:owance|ce)/i,
+      /staff\s*allowance/i,
+      /\bstipend\b/i,
+      /seconded\s*staff/i,
+      /augment(?:ation)?\s*(of\s*)?salar/i,
+      /monthly\s*allowance/i,
+    ],
+  },
+  {
     group: 'Recharge cards / airtime',
     patterns: [
       /\brecharge\b/i, /\bairtime\b/i, /\bcall\s*card/i, /\bdata\s*bundle/i,
@@ -120,6 +131,7 @@ export function classifyExpenseGroup(title, category, manualGroup) {
   if (cat === 'RCA') return 'RCA (security / guards)';
   if (cat === 'DTA') return 'DTA / travel / flights';
   if (cat === 'Salary') return 'Salary / staff pay';
+  if (cat === 'Site Allowance') return 'Site allowance (staff stipend)';
 
   const text = String(title || '');
   for (const rule of RULES) {
@@ -141,7 +153,8 @@ export function knownExpenseGroups() {
     'RCA (security / guards)',
     'DTA / travel / flights',
     'Salary / staff pay',
-    ...RULES.map((r) => r.group),
+    'Site allowance (staff stipend)',
+    ...RULES.map((r) => r.group).filter((x) => x !== 'Site allowance (staff stipend)'),
     'Unclassified',
   ];
 }

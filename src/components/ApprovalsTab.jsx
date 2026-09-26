@@ -16,9 +16,10 @@ import {
 
 const CATEGORIES = [
   { key: 'RCA', label: 'RCA (guards / estate security)' },
-  { key: 'DTA', label: 'DTA / LT&T / Flight / Contingency' },
-  { key: 'Salary', label: 'Salary' },
-  { key: 'Others', label: 'Others (fuel, PMS, AGO, etc.)' },
+  { key: 'DTA', label: 'DTA / LT&T / Flight / Contingency (travel)' },
+  { key: 'Site Allowance', label: 'Site Allowance (staff stipend — seconded staff)' },
+  { key: 'Salary', label: 'Salary (permanent staff only)' },
+  { key: 'Others', label: 'Others (fuel, PMS, AGO, recharge, etc.)' },
 ];
 
 const BLANK = {
@@ -381,6 +382,29 @@ export default function ApprovalsTab() {
     else setSelected(new Set(filtered.map((r) => r.id)));
   }
 
+  async function handleDeleteAllFiltered() {
+    if (!filtered.length) { alert('No rows match the current filters.'); return; }
+    if (!confirm(`Soft-delete ALL ${filtered.length} expenditure row(s) currently shown?`)) return;
+    const typed = prompt(`Type DELETE ${filtered.length} to confirm:`);
+    if (typed !== `DELETE ${filtered.length}`) { alert('Cancelled.'); return; }
+    setBulkBusy(true);
+    const ids = filtered.map((r) => r.id);
+    let done = 0;
+    for (let i = 0; i < ids.length; i += 200) {
+      const chunk = ids.slice(i, i + 200);
+      const { data, error: err } = await supabase
+        .from('approvals_expenditures')
+        .update({ is_deleted: true })
+        .in('id', chunk)
+        .select('id');
+      if (err) { alert(err.message); break; }
+      done += (data || []).length;
+    }
+    setBulkBusy(false);
+    alert(`Deleted ${done} record(s).`);
+    load();
+  }
+
   async function handleDeleteSelected() {
     const ids = [...selected];
     if (!ids.length) return;
@@ -428,7 +452,7 @@ export default function ApprovalsTab() {
         <div>
           <h2>Approvals / Expenditure</h2>
           <p className="muted" style={{ margin: 0 }}>
-            RCA, DTA/travel, salary, fuel and other operational spend — import by category from Excel.
+            RCA, DTA (travel), Site Allowance (staff stipend), Salary (permanent), Others — import by category. Totals update with filters.
           </p>
         </div>
         <div className="flex wrap">
@@ -451,6 +475,15 @@ export default function ApprovalsTab() {
             onClick={handleDeleteSelected}
           >
             Delete selected ({selected.size})
+          </button>
+          <button
+            type="button"
+            className="btn btn-danger"
+            disabled={bulkBusy || filtered.length === 0}
+            onClick={handleDeleteAllFiltered}
+            title="Deletes every row matching current filters"
+          >
+            Delete all filtered ({filtered.length})
           </button>
           <button type="button" className="btn btn-outline" onClick={handleReclassifyAll} disabled={bulkBusy || !rows.length}>
             Re-classify groups
