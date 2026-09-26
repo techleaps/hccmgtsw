@@ -52,6 +52,24 @@ export function expenseFieldDefs(category) {
       synonyms: ['description', 'title', 'particulars', 'item', 'details'],
     },
     {
+      key: 'expense_group',
+      label: 'Category / Expense type (from Excel)',
+      type: 'text',
+      synonyms: [
+        'category', 'expense category', 'expense type', 'expense group',
+        'type of expense', 'classification', 'group', 'sub category', 'subcategory',
+        'heading', 'class',
+      ],
+    },
+    {
+      key: 'category',
+      label: 'Main category (RCA / DTA / Salary / Site Allowance / Others)',
+      type: 'text',
+      synonyms: [
+        'main category', 'primary category', 'budget category',
+      ],
+    },
+    {
       key: 'amount_applied',
       label: 'Amount / Amount Applied',
       type: 'number',
@@ -164,12 +182,30 @@ function matchEstateFromSite(siteText, estates) {
   return null;
 }
 
+function normalizeMainCategory(raw, fallback) {
+  const s = String(raw || '').trim().toLowerCase();
+  if (!s) return fallback;
+  if (s.includes('site all') || s === 'stipend' || s.includes('staff all')) return 'Site Allowance';
+  if (s === 'rca' || s.includes('guard') || s.includes('security')) return 'RCA';
+  if (s === 'dta' || s.includes('flight') || s.includes('travel') || s.includes('lt&t')) return 'DTA';
+  if (s.includes('salary') || s.includes('payroll') || s.includes('unestablished')) return 'Salary';
+  if (s.includes('other')) return 'Others';
+  // If Excel "category" is a sub-type (recharge, pms), keep main as fallback (usually Others)
+  return fallback;
+}
+
 function transformExpenseRecord(r, category, estates, forcedEstateId) {
   const amountApproved = Number(r.amount_approved) || 0;
   const amountApplied = Number(r.amount_applied) || amountApproved;
   const title = String(r.title || '').trim() || 'Untitled';
-  const cat = category || r.category || 'Others';
-  const expense_group = classifyExpenseGroup(title, cat, r.expense_group);
+  // File-level category (dialog) is default; Excel main category column can override when it matches
+  const cat = normalizeMainCategory(r.category, category || 'Others');
+  // Excel "Category" column is primarily the sub-type (recharge, PMS, etc.) → expense_group
+  const fromExcelGroup = String(r.expense_group || '').trim()
+    || (r.category && !['rca', 'dta', 'salary', 'others', 'site allowance'].includes(String(r.category).trim().toLowerCase())
+      ? String(r.category).trim()
+      : '');
+  const expense_group = classifyExpenseGroup(title, cat, fromExcelGroup || null);
   const site = (r.site || '').trim() || null;
   // Forced estate only if user chose one; else try Site column; else leave null (company-wide)
   let estate_id = forcedEstateId || r.estate_id || null;
