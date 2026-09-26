@@ -541,6 +541,7 @@ export default function BulkImportModal({ title, tableName, fieldDefs, estates =
         )}
 
         {step === 'mapping' && (
+
           <div>
             <p className="muted">
               <b>{fileName}</b> — {rowsRaw.length} data row{rowsRaw.length === 1 ? '' : 's'} found. Match each

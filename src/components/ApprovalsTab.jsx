@@ -57,11 +57,29 @@ export function expenseFieldDefs(category) {
     },
     {
       key: 'purpose',
-      label: 'Contractor / Portfolio / Payment note',
+      label: 'Contractor',
       type: 'text',
       synonyms: [
-        'contractor', 'contractor name', 'portfolio', 'portforlio',
-        'payment made', 'reason', 'beneficiary', 'applicant',
+        'contractor', 'contractor name', 'beneficiary', 'applicant',
+        'applicant/beneficiary', 'payee', 'name of contractor',
+      ],
+    },
+    {
+      key: 'portfolio',
+      label: 'Portfolio / House units',
+      type: 'text',
+      synonyms: [
+        'portfolio', 'portforlio', 'house numbers', 'house no', 'units',
+        'plots', 'property',
+      ],
+    },
+    {
+      key: 'payment_note',
+      label: 'Payment made (text / milestone note)',
+      type: 'text',
+      synonyms: [
+        'payment made', 'milestone', 'milestones', 'payment note',
+        'reason', 'payment status',
       ],
     },
     {
@@ -226,20 +244,29 @@ function transformExpenseRecord(r, category, estates, forcedEstateId) {
   if (!estate_id && site) {
     estate_id = matchEstateFromSite(site, estates);
   }
+  const contractor = String(r.purpose || '').trim() || null;
+  const portfolio = String(r.portfolio || '').trim() || null;
+  const paymentNote = String(r.payment_note || '').trim() || null;
+  const extraBits = [];
+  if (portfolio) extraBits.push(`Portfolio: ${portfolio}`);
+  if (paymentNote) extraBits.push(paymentNote);
+  const remarks = [r.remarks, ...extraBits].filter(Boolean).join(' · ') || null;
+
+  // Drop non-DB keys (portfolio, payment_note) — folded into purpose/remarks
   return {
     title,
-    purpose: r.purpose || r.request_ref || null, // contractor / portfolio text when imported under Award of Contract
+    purpose: contractor, // Contractor name
     category: cat,
     expense_group,
     month_label: (r.month_label || '').trim() || null,
-    site,
+    site: site || portfolio || null, // portfolio as site if no site
     request_ref: (r.request_ref || '').trim() || null,
     amount_applied: amountApplied,
     amount_approved: amountApproved,
     date_applied: r.date_applied || null,
     date_of_approval: r.date_of_approval || null,
     comments: r.comments || null,
-    remarks: r.remarks || null,
+    remarks,
     estate_id: estate_id || null,
   };
 }
